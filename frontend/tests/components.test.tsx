@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { routes } from '../src/app/routes';
 import { ErrorBoundary } from '../src/components/feedback/ErrorBoundary';
+import { AuthProvider } from '../src/features/auth/AuthContext';
+import { anonymousAuthApi } from './testUtils';
 import { DemoCredentials } from '../src/features/auth/DemoCredentials';
 import { DEMO_ACCOUNTS } from '../src/features/auth/demoAccounts';
 import { SystemStatus } from '../src/features/system/SystemStatus';
@@ -17,7 +19,11 @@ const healthy: ReadinessReport = {
 
 function renderAt(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
-  return render(<RouterProvider router={router} />);
+  return render(
+    <AuthProvider api={anonymousAuthApi()}>
+      <RouterProvider router={router} />
+    </AuthProvider>,
+  );
 }
 
 describe('SystemStatus', () => {

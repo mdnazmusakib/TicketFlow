@@ -30,7 +30,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const app = createApp({ config, logger, controllers: container.controllers });
+  const app = createApp({
+    config,
+    logger,
+    controllers: container.controllers,
+    authenticate: container.authenticate,
+  });
   const server: Server = app.listen(config.port, () => {
     logger.info({ port: config.port, env: config.nodeEnv }, 'TicketFlow API listening');
   });

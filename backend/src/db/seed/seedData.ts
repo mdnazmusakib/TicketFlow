@@ -165,10 +165,5 @@ export const DEMO_EVENTS: readonly SeedEvent[] = [
   },
 ];
 
-/** Row labels A..Z, AA..AZ — matches the schema limit of 52 rows. */
-export function rowLabel(index: number): string {
-  if (!Number.isInteger(index) || index < 0 || index >= 52)
-    throw new Error('Row index out of range');
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  return index < 26 ? letters[index]! : `A${letters[index - 26]!}`;
-}
+/** Row labels A..Z, AA..AZ (shared with the seat map editor). */
+export { rowLabel } from '../../domain/events/seatMap';

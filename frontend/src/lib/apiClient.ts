@@ -96,6 +96,8 @@ export class ApiClient {
       clearTimeout(timeout);
     }
 
+    if (response.status === 204) return { status: 204, data: undefined as T };
+
     const payload: unknown = await response.json().catch(() => undefined);
     const requestId = response.headers.get('x-request-id') ?? undefined;
 
@@ -127,6 +129,18 @@ export class ApiClient {
     return this.request<T>(path, { ...options, method: 'POST', body });
   }
 
+  put<T>(path: string, body?: unknown, options: Omit<RequestOptions, 'method' | 'body'> = {}) {
+    return this.request<T>(path, { ...options, method: 'PUT', body });
+  }
+
+  patch<T>(path: string, body?: unknown, options: Omit<RequestOptions, 'method' | 'body'> = {}) {
+    return this.request<T>(path, { ...options, method: 'PATCH', body });
+  }
+
+  delete<T = undefined>(path: string, options: Omit<RequestOptions, 'method' | 'body'> = {}) {
+    return this.request<T>(path, { ...options, method: 'DELETE' });
+  }
+
   private buildUrl(path: string, query?: RequestOptions['query']): string {
     const normalized = path.startsWith('/') ? path : `/${path}`;
     const params = new URLSearchParams();
@@ -144,4 +158,15 @@ export const apiClient = new ApiClient(env.apiBaseUrl);
 export function toErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return 'Something went wrong. Please try again.';
+}
+
+/** Field-level messages from a validation error, keyed by the last path segment. */
+export function fieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError)) return {};
+  const result: Record<string, string> = {};
+  for (const detail of error.details) {
+    const key = detail.path.split('.').at(-1) ?? detail.path;
+    result[key] ??= detail.message;
+  }
+  return result;
 }

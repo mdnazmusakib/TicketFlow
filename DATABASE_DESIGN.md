@@ -358,7 +358,7 @@ Seat allocations: `HELD → BOOKED | RELEASED`, `BOOKED → RELEASED`; `RELEASED
 
 1. Expire stale holds for the event (§5.3).
 2. Acquire Redis locks `seat_hold:{eventId}:{seatId}` all-or-nothing (Lua script, owner token, TTL 300 s).
-3. `BEGIN`; take `pg_advisory_xact_lock` on `(customer_id, event_id)` to serialise one customer's parallel requests; count active seats (`HELD`/`BOOKED` rows of active bookings) and reject if `count + requested > MAX_TICKETS_PER_USER_PER_EVENT` (default 6).
+3. `BEGIN`; take `SELECT … FROM events WHERE id = $1 FOR SHARE` (organizer edits lock the event row `FOR UPDATE`, so a hold can never race a seat-map rebuild or reschedule), then `pg_advisory_xact_lock` on `(customer_id, event_id)` to serialise one customer's parallel requests; count active seats (`HELD`/`BOOKED` rows of active bookings) and reject if `count + requested > MAX_TICKETS_PER_USER_PER_EVENT` (default 6).
 4. Insert `bookings` (`HELD`, `hold_expires_at = now() + 300 s`, server-computed total) and `booking_seats` (`HELD`, price snapshot); `idx_active_seat_per_event` is the final guard.
 5. Insert history `NULL → HELD`; `COMMIT`; release only locks owned by this token (compare-and-delete).
 
@@ -379,6 +379,21 @@ In one transaction: lock the booking (`FOR UPDATE`), re-verify owner, state and 
 Worker selects confirmed bookings with `reminder_sent_at IS NULL` whose event starts within the next hour, inserts `EVENT_REMINDER_1H` notifications (dedupe keys make re-runs harmless) and sets `reminder_sent_at`.
 
 ---
+
+### 5.7 Organizer changes vs. active bookings (Phase 2)
+
+Organizer mutations run in a transaction that locks the event row `FOR UPDATE` and re-checks state:
+
+| Change | Allowed when |
+| --- | --- |
+| Title, description, banner, pricing strategy, category name/price | Event is DRAFT or PUBLISHED (bookings keep their price snapshot) |
+| Venue, start/end time | No active bookings (CONFIRMED, or HELD/PENDING_PAYMENT with an unexpired hold) |
+| Move seats to another category | None of those seats has an active allocation |
+| Rebuild the seat map | The event has no booking history at all |
+| Unpublish / cancel | No active bookings (refunding sold events comes with booking management) |
+| Delete | DRAFT or CANCELLED and no booking history |
+
+No schema change was needed in Phase 2: users, venues, events, categories and seats already carry every field used by authentication and event management.
 
 ## 6. Triggers and functions
 

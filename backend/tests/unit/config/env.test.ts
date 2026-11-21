@@ -13,6 +13,8 @@ const production: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   CORS_ORIGINS: 'https://ticketflow.example.com',
   JWT_SECRET: 'Zq8vN3kL0pR7tX2wY5bC9dF4gH6jK1mQzA0sD8fG3hJ',
+  EMAIL_TRANSPORT: 'smtp',
+  SMTP_HOST: 'smtp.example.com',
 };
 
 function issuesOf(env: NodeJS.ProcessEnv): string[] {
@@ -132,5 +134,42 @@ describe('loadConfig', () => {
 
   it('ConfigError message lists the issues', () => {
     expect(() => loadConfig({})).toThrow(/Invalid environment configuration:\n {2}- /);
+  });
+
+  it('derives cookie, OTP and email settings', () => {
+    const dev = loadConfig(base);
+    expect(dev.auth).toMatchObject({
+      otpTtlSeconds: 300,
+      otpMaxAttempts: 5,
+      otpResendCooldownSeconds: 60,
+      cookie: { name: 'tf_session', secure: false, sameSite: 'lax' },
+    });
+    expect(dev.email).toEqual({
+      transport: 'console',
+      from: 'TicketFlow <no-reply@ticketflow.local>',
+    });
+
+    const prod = loadConfig({ ...production, SMTP_USER: 'u', SMTP_PASS: 'p' });
+    expect(prod.auth.cookie.secure).toBe(true);
+    expect(prod.email.smtp).toEqual({
+      host: 'smtp.example.com',
+      port: 587,
+      secure: false,
+      user: 'u',
+      pass: 'p',
+    });
+  });
+
+  it('requires SMTP in production and forbids insecure cookies there', () => {
+    const issues = issuesOf({ ...production, EMAIL_TRANSPORT: 'console', COOKIE_SECURE: 'false' });
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        'EMAIL_TRANSPORT: must be smtp in production (console transport prints OTPs)',
+        'COOKIE_SECURE: must be true in production',
+      ]),
+    );
+    expect(issuesOf({ ...base, EMAIL_TRANSPORT: 'smtp' })).toContain(
+      'SMTP_HOST: is required when EMAIL_TRANSPORT=smtp',
+    );
   });
 });

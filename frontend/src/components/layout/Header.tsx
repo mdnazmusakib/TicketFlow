@@ -1,10 +1,34 @@
 import { useState } from 'react';
-import { Link, NavLink } from 'react-router';
+import { Link, NavLink, useNavigate } from 'react-router';
+import { useAuth } from '../../features/auth/AuthContext';
 
-const NAV_ITEMS = [{ to: '/', label: 'Home', end: true }];
+interface NavItem {
+  to: string;
+  label: string;
+  end?: boolean;
+}
 
 export function Header() {
   const [open, setOpen] = useState(false);
+  const { user, status, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const items: NavItem[] = [
+    { to: '/', label: 'Home', end: true },
+    { to: '/events', label: 'Events' },
+  ];
+  if (user && (user.role === 'ORGANIZER' || user.role === 'ADMIN'))
+    items.push({ to: '/organizer', label: 'Organizer' });
+  if (user) items.push({ to: '/account', label: 'Account' });
+  if (status === 'anonymous') {
+    items.push({ to: '/login', label: 'Sign in' }, { to: '/register', label: 'Register' });
+  }
+
+  async function onLogout() {
+    setOpen(false);
+    await logout();
+    navigate('/');
+  }
 
   return (
     <header className="header">
@@ -25,7 +49,7 @@ export function Header() {
           <span className="visually-hidden">Toggle navigation</span>☰
         </button>
         <nav id="primary-nav" className={`nav ${open ? 'nav--open' : ''}`} aria-label="Primary">
-          {NAV_ITEMS.map((item) => (
+          {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -36,6 +60,11 @@ export function Header() {
               {item.label}
             </NavLink>
           ))}
+          {user && (
+            <button type="button" className="nav__link link-button" onClick={onLogout}>
+              Sign out ({user.name})
+            </button>
+          )}
         </nav>
       </div>
     </header>

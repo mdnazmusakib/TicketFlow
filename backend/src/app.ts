@@ -1,4 +1,6 @@
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import type { RequestHandler } from 'express';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import type { Logger } from 'pino';
@@ -15,13 +17,14 @@ export interface AppDependencies {
   config: AppConfig;
   logger: Logger;
   controllers: Controllers;
+  authenticate: RequestHandler;
 }
 
 /**
  * Builds the Express app from injected dependencies (no I/O here), so tests
  * can create it with fakes and the server can create it with real adapters.
  */
-export function createApp({ config, logger, controllers }: AppDependencies): Express {
+export function createApp({ config, logger, controllers, authenticate }: AppDependencies): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -39,8 +42,14 @@ export function createApp({ config, logger, controllers }: AppDependencies): Exp
     }),
   );
   app.use(cors(buildCorsOptions(config.corsOrigins)));
+  // JSON only: HTML forms (urlencoded) are not accepted, which removes a classic CSRF vector.
   app.use(express.json({ limit: '100kb' }));
-  app.use(express.urlencoded({ extended: false, limit: '100kb' }));
+  app.use(cookieParser());
+
+  const authLimiter = createRateLimiter({
+    windowMs: config.rateLimit.windowMs,
+    max: config.auth.rateLimitMax,
+  });
 
   app.use(
     '/api',
@@ -49,7 +58,7 @@ export function createApp({ config, logger, controllers }: AppDependencies): Exp
       max: config.rateLimit.max,
       skip: (req) => req.path.startsWith('/health'),
     }),
-    createApiRouter(controllers),
+    createApiRouter(controllers, { authenticate, authLimiter }),
   );
 
   app.use(notFoundHandler);

@@ -5,12 +5,22 @@ export type AsyncState<T> =
   | { status: 'success'; data: T; error?: undefined }
   | { status: 'error'; data?: undefined; error: unknown };
 
-/** Runs an abortable async loader on mount; `reload` re-runs it. Ignores stale results. */
+/**
+ * Runs an abortable async loader on mount and whenever `key` changes;
+ * `reload` re-runs it. Stale results are ignored.
+ */
 export function useAsync<T>(
   loader: (signal: AbortSignal) => Promise<T>,
+  key = '',
 ): AsyncState<T> & { reload: () => void } {
   const [state, setState] = useState<AsyncState<T>>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const [lastKey, setLastKey] = useState(key);
+  // Reset to loading during render when the key changes (React's "adjust state on prop change" pattern).
+  if (lastKey !== key) {
+    setLastKey(key);
+    setState({ status: 'loading' });
+  }
   const loaderRef = useRef(loader);
 
   // Declared first so the latest loader is in place before the fetch effect runs.
@@ -29,7 +39,7 @@ export function useAsync<T>(
       },
     );
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, key]);
 
   const reload = useCallback(() => {
     setState({ status: 'loading' });

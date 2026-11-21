@@ -38,8 +38,11 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ['pg', 'ioredis', '**/infrastructure/**'],
+              // Drivers and infrastructure adapters, except the pure Redis key builders.
+              regex: '^(pg|ioredis)$|/infrastructure/(?!redis/keys$)',
               message: 'Use services/repositories; layers must not skip each other.',
+              // Depending on an interface type (DIP) is fine; concrete adapters are wired in container.ts.
+              allowTypeImports: true,
             },
           ],
         },
