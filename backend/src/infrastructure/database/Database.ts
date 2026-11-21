@@ -46,7 +46,10 @@ export class Database implements Queryable, TransactionRunner {
       } catch (error) {
         if (attempt < maxRetries && isRetryableTransactionError(error)) {
           const backoffMs = 20 * 2 ** attempt + Math.floor(Math.random() * 20);
-          this.logger?.warn({ attempt: attempt + 1, sqlState: sqlState(error) }, 'Retrying transaction');
+          this.logger?.warn(
+            { attempt: attempt + 1, sqlState: sqlState(error) },
+            'Retrying transaction',
+          );
           await new Promise((resolve) => setTimeout(resolve, backoffMs));
           continue;
         }
@@ -55,7 +58,10 @@ export class Database implements Queryable, TransactionRunner {
     }
   }
 
-  private async runOnce<T>(work: (tx: Queryable) => Promise<T>, options: TransactionOptions): Promise<T> {
+  private async runOnce<T>(
+    work: (tx: Queryable) => Promise<T>,
+    options: TransactionOptions,
+  ): Promise<T> {
     const client: PoolClient = await this.pool.connect();
     let released = false;
     try {

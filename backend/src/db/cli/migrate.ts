@@ -22,7 +22,9 @@ async function main(): Promise<void> {
     const executed = await migrator.migrate();
     logger.info(
       executed.length > 0 ? { executed } : {},
-      executed.length > 0 ? `Applied ${executed.length} migration(s)` : 'Database already up to date',
+      executed.length > 0
+        ? `Applied ${executed.length} migration(s)`
+        : 'Database already up to date',
     );
   } finally {
     await pool.end();

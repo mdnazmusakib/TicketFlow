@@ -71,7 +71,9 @@ describe('seat state machine', () => {
       SEAT_STATES.filter((to) => canTransitionSeat(from, to)).map((to) => `${from}->${to}`),
     );
     expect(allowed.sort()).toEqual(['BOOKED->RELEASED', 'HELD->BOOKED', 'HELD->RELEASED']);
-    expect(() => assertSeatTransition('RELEASED', 'HELD')).toThrow('Invalid seat transition RELEASED -> HELD');
+    expect(() => assertSeatTransition('RELEASED', 'HELD')).toThrow(
+      'Invalid seat transition RELEASED -> HELD',
+    );
     expect(() => assertSeatTransition('HELD', 'BOOKED')).not.toThrow();
   });
 });

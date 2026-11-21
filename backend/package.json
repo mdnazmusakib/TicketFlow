@@ -8,13 +8,14 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest",
+    "test": "jest --selectProjects unit integration",
     "test:unit": "jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration",
-    "test:coverage": "jest --coverage",
+    "test:coverage": "jest --selectProjects unit integration --coverage",
     "db:migrate": "tsx src/db/cli/migrate.ts",
     "db:migrate:status": "tsx src/db/cli/migrate.ts --status",
-    "db:seed": "tsx src/db/cli/seed.ts"
+    "db:seed": "tsx src/db/cli/seed.ts",
+    "test:live": "node scripts/run-live-tests.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

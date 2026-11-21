@@ -42,11 +42,14 @@ export function buildContainer(config: AppConfig, logger: Logger): Container {
     ttlStore: new RedisTtlStore(redis, config.redis.keyPrefix),
   };
 
-  const healthService = new HealthService([new PostgresHealthProbe(db), new RedisHealthProbe(redis)], {
-    timeoutMs: 3_000,
-    version: APP_VERSION,
-    startedAt: new Date(),
-  });
+  const healthService = new HealthService(
+    [new PostgresHealthProbe(db), new RedisHealthProbe(redis)],
+    {
+      timeoutMs: 3_000,
+      version: APP_VERSION,
+      startedAt: new Date(),
+    },
+  );
 
   let closed = false;
 

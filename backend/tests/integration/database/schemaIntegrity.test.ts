@@ -14,7 +14,11 @@ import {
 } from '../../helpers/fixtures';
 
 /** Moves a fresh booking to `status` along a valid path, filling required timestamps. */
-async function driveTo(testDb: TestDatabase, bookingId: string, status: BookingStatus): Promise<void> {
+async function driveTo(
+  testDb: TestDatabase,
+  bookingId: string,
+  status: BookingStatus,
+): Promise<void> {
   const path: Record<BookingStatus, BookingStatus[]> = {
     HELD: [],
     PENDING_PAYMENT: ['PENDING_PAYMENT'],
@@ -67,7 +71,9 @@ describe('schema integrity (real PostgreSQL)', () => {
 
     it('lets exactly one of many concurrent transactions hold the same seat', async () => {
       const contenders = await Promise.all(
-        Array.from({ length: 8 }, async () => insertBooking(testDb.pool, fx.eventId, await insertUser(testDb.pool))),
+        Array.from({ length: 8 }, async () =>
+          insertBooking(testDb.pool, fx.eventId, await insertUser(testDb.pool)),
+        ),
       );
       const outcomes = await Promise.allSettled(
         contenders.map((bookingId) =>
@@ -91,17 +97,28 @@ describe('schema integrity (real PostgreSQL)', () => {
         [allocation],
       );
       const second = await insertBooking(testDb.pool, fx.eventId, await insertUser(testDb.pool));
-      await expect(holdSeat(testDb.pool, second, fx.eventId, fx.seatIds[2]!)).resolves.toBeDefined();
-      const { rows } = await testDb.pool.query('SELECT count(*)::int AS n FROM booking_seats WHERE seat_id = $1', [fx.seatIds[2]]);
+      await expect(
+        holdSeat(testDb.pool, second, fx.eventId, fx.seatIds[2]!),
+      ).resolves.toBeDefined();
+      const { rows } = await testDb.pool.query(
+        'SELECT count(*)::int AS n FROM booking_seats WHERE seat_id = $1',
+        [fx.seatIds[2]],
+      );
       expect(rows[0].n).toBe(2);
     });
 
     it('never re-activates a RELEASED allocation', async () => {
       const booking = await insertBooking(testDb.pool, fx.eventId, customerId);
       const allocation = await holdSeat(testDb.pool, booking, fx.eventId, fx.seatIds[3]!);
-      await testDb.pool.query(`UPDATE booking_seats SET seat_state = 'RELEASED', released_at = now() WHERE id = $1`, [allocation]);
+      await testDb.pool.query(
+        `UPDATE booking_seats SET seat_state = 'RELEASED', released_at = now() WHERE id = $1`,
+        [allocation],
+      );
       const failure = await pgFailure(
-        testDb.pool.query(`UPDATE booking_seats SET seat_state = 'HELD', released_at = NULL WHERE id = $1`, [allocation]),
+        testDb.pool.query(
+          `UPDATE booking_seats SET seat_state = 'HELD', released_at = NULL WHERE id = $1`,
+          [allocation],
+        ),
       );
       expect(failure.message).toContain('invalid seat state transition RELEASED -> HELD');
     });
@@ -111,8 +128,13 @@ describe('schema integrity (real PostgreSQL)', () => {
     it('rejects booking a seat that belongs to another event', async () => {
       const other = await insertEventWithSeats(testDb.pool);
       const booking = await insertBooking(testDb.pool, fx.eventId, customerId);
-      const failure = await pgFailure(holdSeat(testDb.pool, booking, fx.eventId, other.seatIds[0]!));
-      expect(failure).toMatchObject({ code: '23503', constraint: 'fk_booking_seats_seat_same_event' });
+      const failure = await pgFailure(
+        holdSeat(testDb.pool, booking, fx.eventId, other.seatIds[0]!),
+      );
+      expect(failure).toMatchObject({
+        code: '23503',
+        constraint: 'fk_booking_seats_seat_same_event',
+      });
     });
 
     it('rejects a seat whose category belongs to another event', async () => {
@@ -135,19 +157,27 @@ describe('schema integrity (real PostgreSQL)', () => {
           [intruder, fx.venueId],
         ),
       );
-      expect(failure).toMatchObject({ code: '23503', constraint: 'fk_events_venue_same_organizer' });
+      expect(failure).toMatchObject({
+        code: '23503',
+        constraint: 'fk_events_venue_same_organizer',
+      });
     });
 
     it('deleting an event without bookings cascades to categories and seats', async () => {
       const lonely = await insertEventWithSeats(testDb.pool);
       await testDb.pool.query('DELETE FROM events WHERE id = $1', [lonely.eventId]);
-      const { rows } = await testDb.pool.query('SELECT count(*)::int AS n FROM seats WHERE event_id = $1', [lonely.eventId]);
+      const { rows } = await testDb.pool.query(
+        'SELECT count(*)::int AS n FROM seats WHERE event_id = $1',
+        [lonely.eventId],
+      );
       expect(rows[0].n).toBe(0);
     });
 
     it('blocks deleting an event that has bookings (financial history)', async () => {
       await insertBooking(testDb.pool, fx.eventId, customerId);
-      const failure = await pgFailure(testDb.pool.query('DELETE FROM events WHERE id = $1', [fx.eventId]));
+      const failure = await pgFailure(
+        testDb.pool.query('DELETE FROM events WHERE id = $1', [fx.eventId]),
+      );
       // ON DELETE RESTRICT => restrict_violation
       expect(failure.code).toBe('23001');
     });
@@ -159,7 +189,11 @@ describe('schema integrity (real PostgreSQL)', () => {
       for (const from of BOOKING_STATUSES) {
         for (const to of BOOKING_STATUSES) {
           if (from === to) continue;
-          const bookingId = await insertBooking(testDb.pool, fx.eventId, await insertUser(testDb.pool));
+          const bookingId = await insertBooking(
+            testDb.pool,
+            fx.eventId,
+            await insertUser(testDb.pool),
+          );
           await driveTo(testDb, bookingId, from);
           const allowedByDb = await setStatus(testDb, bookingId, to).then(
             () => true,
@@ -193,20 +227,46 @@ describe('schema integrity (real PostgreSQL)', () => {
     it('enforces amount and timestamp consistency checks', async () => {
       const bookingId = await insertBooking(testDb.pool, fx.eventId, customerId, 5000);
       expect(
-        (await pgFailure(testDb.pool.query('UPDATE bookings SET refund_amount_minor = 10 WHERE id = $1', [bookingId]))).constraint,
+        (
+          await pgFailure(
+            testDb.pool.query('UPDATE bookings SET refund_amount_minor = 10 WHERE id = $1', [
+              bookingId,
+            ]),
+          )
+        ).constraint,
       ).toBe('chk_bookings_refund_only_when_cancelled');
       await setStatus(testDb, bookingId, 'CANCELLED');
       expect(
-        (await pgFailure(testDb.pool.query('UPDATE bookings SET refund_amount_minor = 6000 WHERE id = $1', [bookingId]))).constraint,
+        (
+          await pgFailure(
+            testDb.pool.query('UPDATE bookings SET refund_amount_minor = 6000 WHERE id = $1', [
+              bookingId,
+            ]),
+          )
+        ).constraint,
       ).toBe('chk_bookings_amounts');
-      await expect(testDb.pool.query('UPDATE bookings SET refund_amount_minor = 5000 WHERE id = $1', [bookingId])).resolves.toBeDefined();
+      await expect(
+        testDb.pool.query('UPDATE bookings SET refund_amount_minor = 5000 WHERE id = $1', [
+          bookingId,
+        ]),
+      ).resolves.toBeDefined();
       const pending = await insertBooking(testDb.pool, fx.eventId, customerId);
       await setStatus(testDb, pending, 'PENDING_PAYMENT');
       expect(
-        (await pgFailure(testDb.pool.query('UPDATE bookings SET hold_expires_at = NULL WHERE id = $1', [pending]))).constraint,
+        (
+          await pgFailure(
+            testDb.pool.query('UPDATE bookings SET hold_expires_at = NULL WHERE id = $1', [
+              pending,
+            ]),
+          )
+        ).constraint,
       ).toBe('chk_bookings_hold_expiry');
       expect(
-        (await pgFailure(testDb.pool.query(`UPDATE bookings SET status = 'CONFIRMED' WHERE id = $1`, [pending]))).constraint,
+        (
+          await pgFailure(
+            testDb.pool.query(`UPDATE bookings SET status = 'CONFIRMED' WHERE id = $1`, [pending]),
+          )
+        ).constraint,
       ).toBe('chk_bookings_confirmed_at');
     });
 
@@ -217,12 +277,21 @@ describe('schema integrity (real PostgreSQL)', () => {
          VALUES ($1, NULL, 'HELD', 'seat hold') RETURNING id`,
         [bookingId],
       );
-      const update = await pgFailure(testDb.pool.query(`UPDATE booking_status_history SET reason = 'x' WHERE id = $1`, [rows[0]!.id]));
+      const update = await pgFailure(
+        testDb.pool.query(`UPDATE booking_status_history SET reason = 'x' WHERE id = $1`, [
+          rows[0]!.id,
+        ]),
+      );
       expect(update.message).toContain('append-only');
-      const del = await pgFailure(testDb.pool.query('DELETE FROM booking_status_history WHERE id = $1', [rows[0]!.id]));
+      const del = await pgFailure(
+        testDb.pool.query('DELETE FROM booking_status_history WHERE id = $1', [rows[0]!.id]),
+      );
       expect(del.message).toContain('append-only');
       const firstMustBeHeld = await pgFailure(
-        testDb.pool.query(`INSERT INTO booking_status_history (booking_id, to_status) VALUES ($1, 'CONFIRMED')`, [bookingId]),
+        testDb.pool.query(
+          `INSERT INTO booking_status_history (booking_id, to_status) VALUES ($1, 'CONFIRMED')`,
+          [bookingId],
+        ),
       );
       expect(firstMustBeHeld.constraint).toBe('chk_bsh_initial_is_held');
     });
@@ -249,7 +318,9 @@ describe('schema integrity (real PostgreSQL)', () => {
     it('rejects a reused idempotency key', async () => {
       const bookingId = await insertBooking(testDb.pool, fx.eventId, customerId);
       await insertPayment(bookingId, `dup-${bookingId}`);
-      expect((await pgFailure(insertPayment(bookingId, `dup-${bookingId}`))).constraint).toBe('uq_payments_idempotency_key');
+      expect((await pgFailure(insertPayment(bookingId, `dup-${bookingId}`))).constraint).toBe(
+        'uq_payments_idempotency_key',
+      );
     });
 
     it('allows at most one live refund per payment', async () => {
@@ -263,7 +334,9 @@ describe('schema integrity (real PostgreSQL)', () => {
         );
       await refund(`rf-${bookingId}-1`, 'FAILED');
       await refund(`rf-${bookingId}-2`, 'PENDING');
-      expect((await pgFailure(refund(`rf-${bookingId}-3`, 'PENDING'))).constraint).toBe('uq_refunds_one_active_per_payment');
+      expect((await pgFailure(refund(`rf-${bookingId}-3`, 'PENDING'))).constraint).toBe(
+        'uq_refunds_one_active_per_payment',
+      );
     });
 
     it('deduplicates webhook deliveries and blocks processing unverified ones', async () => {
@@ -276,15 +349,21 @@ describe('schema integrity (real PostgreSQL)', () => {
       const id = `evt-${fx.eventId}`;
       await insert(id, true);
       expect((await pgFailure(insert(id, true))).constraint).toBe('uq_webhook_provider_event');
-      expect((await pgFailure(insert(`${id}-u`, false, 'PROCESSED'))).constraint).toBe('chk_webhook_verified_before_processing');
+      expect((await pgFailure(insert(`${id}-u`, false, 'PROCESSED'))).constraint).toBe(
+        'chk_webhook_verified_before_processing',
+      );
     });
   });
 
   describe('catalog and identity rules', () => {
     it('treats emails case-insensitively', async () => {
-      await testDb.pool.query(`INSERT INTO users (name, email, password_hash) VALUES ('A', 'Case@Example.com', 'x')`);
+      await testDb.pool.query(
+        `INSERT INTO users (name, email, password_hash) VALUES ('A', 'Case@Example.com', 'x')`,
+      );
       const failure = await pgFailure(
-        testDb.pool.query(`INSERT INTO users (name, email, password_hash) VALUES ('B', 'case@example.COM', 'x')`),
+        testDb.pool.query(
+          `INSERT INTO users (name, email, password_hash) VALUES ('B', 'case@example.COM', 'x')`,
+        ),
       );
       expect(failure.constraint).toBe('uq_users_email_lower');
     });
@@ -308,21 +387,42 @@ describe('schema integrity (real PostgreSQL)', () => {
 
     it('rejects negative prices and duplicate category names per event', async () => {
       expect(
-        (await pgFailure(testDb.pool.query(`UPDATE seat_categories SET price_minor = -1 WHERE id = $1`, [fx.categoryId]))).constraint,
+        (
+          await pgFailure(
+            testDb.pool.query(`UPDATE seat_categories SET price_minor = -1 WHERE id = $1`, [
+              fx.categoryId,
+            ]),
+          )
+        ).constraint,
       ).toBe('chk_seat_categories_price');
       expect(
-        (await pgFailure(
-          testDb.pool.query(`INSERT INTO seat_categories (event_id, name, price_minor) VALUES ($1, 'GENERAL', 1)`, [fx.eventId]),
-        )).constraint,
+        (
+          await pgFailure(
+            testDb.pool.query(
+              `INSERT INTO seat_categories (event_id, name, price_minor) VALUES ($1, 'GENERAL', 1)`,
+              [fx.eventId],
+            ),
+          )
+        ).constraint,
       ).toBe('uq_seat_categories_event_name');
     });
 
     it('maintains updated_at automatically', async () => {
-      const before = await testDb.pool.query<{ updated_at: Date }>('SELECT updated_at FROM events WHERE id = $1', [fx.eventId]);
+      const before = await testDb.pool.query<{ updated_at: Date }>(
+        'SELECT updated_at FROM events WHERE id = $1',
+        [fx.eventId],
+      );
       await testDb.pool.query('SELECT pg_sleep(0.01)');
-      await testDb.pool.query(`UPDATE events SET description = 'changed' WHERE id = $1`, [fx.eventId]);
-      const after = await testDb.pool.query<{ updated_at: Date }>('SELECT updated_at FROM events WHERE id = $1', [fx.eventId]);
-      expect(after.rows[0]!.updated_at.getTime()).toBeGreaterThan(before.rows[0]!.updated_at.getTime());
+      await testDb.pool.query(`UPDATE events SET description = 'changed' WHERE id = $1`, [
+        fx.eventId,
+      ]);
+      const after = await testDb.pool.query<{ updated_at: Date }>(
+        'SELECT updated_at FROM events WHERE id = $1',
+        [fx.eventId],
+      );
+      expect(after.rows[0]!.updated_at.getTime()).toBeGreaterThan(
+        before.rows[0]!.updated_at.getTime(),
+      );
     });
 
     it('allows one notification per dedupe key (idempotent dispatch)', async () => {

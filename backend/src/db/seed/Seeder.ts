@@ -28,7 +28,8 @@ export interface SeederOptions {
   events?: readonly SeedEvent[];
 }
 
-const minutesFrom = (base: Date, minutes: number): Date => new Date(base.getTime() + minutes * 60_000);
+const minutesFrom = (base: Date, minutes: number): Date =>
+  new Date(base.getTime() + minutes * 60_000);
 
 /**
  * Idempotent demo seed. Everything runs in ONE transaction and uses natural or
@@ -79,7 +80,10 @@ export class Seeder {
     });
   }
 
-  private async seedUsers(tx: Queryable, hashes: Map<string, string>): Promise<Map<string, string>> {
+  private async seedUsers(
+    tx: Queryable,
+    hashes: Map<string, string>,
+  ): Promise<Map<string, string>> {
     const ids = new Map<string, string>();
     for (const user of this.users) {
       const { rows } = await tx.query<{ id: string }>(
@@ -100,7 +104,10 @@ export class Seeder {
     return ids;
   }
 
-  private async seedVenues(tx: Queryable, userIds: Map<string, string>): Promise<Map<string, string>> {
+  private async seedVenues(
+    tx: Queryable,
+    userIds: Map<string, string>,
+  ): Promise<Map<string, string>> {
     const ids = new Map<string, string>();
     for (const venue of this.venues) {
       const ownerId = required(userIds, venue.ownerKey, 'user');
@@ -195,7 +202,8 @@ export class Seeder {
     const categoryIds: string[] = [];
     for (const label of labels) {
       const categoryId = categoryByRow.get(label);
-      if (!categoryId) throw new Error(`Seed event "${event.title}" has no category for row ${label}`);
+      if (!categoryId)
+        throw new Error(`Seed event "${event.title}" has no category for row ${label}`);
       for (let seat = 1; seat <= event.seatsPerRow; seat += 1) {
         rowLabels.push(label);
         seatNumbers.push(seat);

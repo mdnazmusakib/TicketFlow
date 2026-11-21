@@ -22,7 +22,10 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
     await testDb.drop();
   });
 
-  function buildApp(overrides: Record<string, string> = {}, redisClient: Pick<Redis, 'ping'> = redis) {
+  function buildApp(
+    overrides: Record<string, string> = {},
+    redisClient: Pick<Redis, 'ping'> = redis,
+  ) {
     const config = testConfig(overrides);
     const healthService = new HealthService(
       [new PostgresHealthProbe(testDb.db), new RedisHealthProbe(redisClient)],
@@ -38,7 +41,10 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
   it('GET /api/health/live returns liveness without touching dependencies', async () => {
     const response = await request(buildApp()).get('/api/health/live');
     expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ success: true, data: { status: 'ok', version: '0.1.0' } });
+    expect(response.body).toMatchObject({
+      success: true,
+      data: { status: 'ok', version: '0.1.0' },
+    });
     expect(response.headers['cache-control']).toBe('no-store');
   });
 
@@ -46,19 +52,28 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
     const response = await request(buildApp()).get('/api/health/ready');
     expect(response.status).toBe(200);
     expect(response.body.data.status).toBe('ok');
-    expect(response.body.data.checks.database).toMatchObject({ status: 'up', details: { schemaVersion: '0006' } });
+    expect(response.body.data.checks.database).toMatchObject({
+      status: 'up',
+      details: { schemaVersion: '0006' },
+    });
     expect(response.body.data.checks.redis).toMatchObject({ status: 'up' });
     expect((await request(buildApp()).get('/api/health')).status).toBe(200);
   });
 
   it('returns 503 when a dependency is down', async () => {
-    const failingRedis = { ping: () => Promise.reject(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })) };
+    const failingRedis = {
+      ping: () =>
+        Promise.reject(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' })),
+    };
     const response = await request(buildApp({}, failingRedis as never)).get('/api/health/ready');
     expect(response.status).toBe(503);
     expect(response.body.success).toBe(true);
     expect(response.body.data).toMatchObject({
       status: 'unavailable',
-      checks: { database: { status: 'up' }, redis: { status: 'down', error: 'unreachable (ECONNREFUSED)' } },
+      checks: {
+        database: { status: 'up' },
+        redis: { status: 'down', error: 'unreachable (ECONNREFUSED)' },
+      },
     });
   });
 
@@ -73,11 +88,15 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
 
   it('enforces the CORS allowlist', async () => {
     const app = buildApp();
-    const allowed = await request(app).get('/api/health/live').set('Origin', 'http://localhost:5173');
+    const allowed = await request(app)
+      .get('/api/health/live')
+      .set('Origin', 'http://localhost:5173');
     expect(allowed.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(allowed.headers['access-control-allow-credentials']).toBe('true');
 
-    const denied = await request(app).get('/api/health/live').set('Origin', 'https://evil.example.com');
+    const denied = await request(app)
+      .get('/api/health/live')
+      .set('Origin', 'https://evil.example.com');
     expect(denied.status).toBe(403);
     expect(denied.body.error.code).toBe('CORS_ORIGIN_DENIED');
     expect(denied.headers['access-control-allow-origin']).toBeUndefined();
@@ -97,7 +116,8 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
     const app = buildApp({ RATE_LIMIT_MAX: '1' });
     expect((await request(app).get('/api/unknown')).status).toBe(404);
     expect((await request(app).get('/api/unknown')).status).toBe(429);
-    for (let i = 0; i < 3; i += 1) expect((await request(app).get('/api/health/live')).status).toBe(200);
+    for (let i = 0; i < 3; i += 1)
+      expect((await request(app).get('/api/health/live')).status).toBe(200);
   });
 
   it('returns the standard JSON error for unknown routes', async () => {
@@ -105,7 +125,11 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
     expect(response.status).toBe(404);
     expect(response.body).toEqual({
       success: false,
-      error: { code: 'NOT_FOUND', message: 'Route GET /does-not-exist not found', requestId: expect.any(String) },
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Route GET /does-not-exist not found',
+        requestId: expect.any(String),
+      },
     });
   });
 

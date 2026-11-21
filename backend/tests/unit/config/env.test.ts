@@ -73,7 +73,12 @@ describe('loadConfig', () => {
 
   it('rejects malformed values without echoing them', () => {
     const secretLookingUrl = 'mysql://root:SuperSecret@db';
-    const issues = issuesOf({ ...base, DATABASE_URL: secretLookingUrl, JWT_SECRET: 'short', PORT: '99999' });
+    const issues = issuesOf({
+      ...base,
+      DATABASE_URL: secretLookingUrl,
+      JWT_SECRET: 'short',
+      PORT: '99999',
+    });
     expect(issues.some((issue) => issue.startsWith('DATABASE_URL:'))).toBe(true);
     expect(issues.some((issue) => issue.startsWith('JWT_SECRET:'))).toBe(true);
     expect(issues.some((issue) => issue.startsWith('PORT:'))).toBe(true);
@@ -86,7 +91,11 @@ describe('loadConfig', () => {
   });
 
   it('rejects a Redis URL with the wrong scheme and invalid key prefix', () => {
-    const issues = issuesOf({ ...base, REDIS_URL: 'http://localhost', REDIS_KEY_PREFIX: 'Bad Prefix' });
+    const issues = issuesOf({
+      ...base,
+      REDIS_URL: 'http://localhost',
+      REDIS_KEY_PREFIX: 'Bad Prefix',
+    });
     expect(issues.join()).toContain('REDIS_URL');
     expect(issues.join()).toContain('REDIS_KEY_PREFIX');
   });

@@ -19,7 +19,10 @@ function memoryStream(): { stream: Writable; output: () => string } {
 describe('createLogger redaction', () => {
   it('censors secrets at the top level and when nested', () => {
     const { stream, output } = memoryStream();
-    const logger = createLogger({ logLevel: 'info', isProduction: true, nodeEnv: 'production' }, stream);
+    const logger = createLogger(
+      { logLevel: 'info', isProduction: true, nodeEnv: 'production' },
+      stream,
+    );
 
     logger.info(
       {
@@ -33,7 +36,15 @@ describe('createLogger redaction', () => {
     );
 
     const line = output();
-    for (const secret of ['hunter2-password', '123456', '$2b$12$hashhash', 'jwt.token.value', '4111111111111111', 'Bearer abc.def', 'tf_session=xyz']) {
+    for (const secret of [
+      'hunter2-password',
+      '123456',
+      '$2b$12$hashhash',
+      'jwt.token.value',
+      '4111111111111111',
+      'Bearer abc.def',
+      'tf_session=xyz',
+    ]) {
       expect(line).not.toContain(secret);
     }
     expect(line).toContain('[REDACTED]');
@@ -47,13 +58,18 @@ describe('createLogger redaction', () => {
   });
 
   it('uses pretty transport only in development without explicit destination', () => {
-    expect(() => createLogger({ logLevel: 'silent', isProduction: false, nodeEnv: 'test' })).not.toThrow();
+    expect(() =>
+      createLogger({ logLevel: 'silent', isProduction: false, nodeEnv: 'test' }),
+    ).not.toThrow();
   });
 });
 
 describe('buildCorsOptions', () => {
   const options = buildCorsOptions(['http://localhost:5173', 'https://app.example.com/']);
-  const origin = options.origin as (o: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => void;
+  const origin = options.origin as (
+    o: string | undefined,
+    cb: (err: Error | null, allow?: boolean) => void,
+  ) => void;
 
   const check = (value: string | undefined) =>
     new Promise<{ error: Error | null; allow?: boolean }>((resolve) => {

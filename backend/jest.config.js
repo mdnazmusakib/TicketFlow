@@ -27,5 +27,12 @@ module.exports = {
       globalTeardown: '<rootDir>/tests/helpers/globalTeardown.mjs',
       setupFilesAfterEnv: ['<rootDir>/tests/helpers/integrationTimeout.ts'],
     },
+    {
+      // Real Supabase + Redis from backend/.env. Run with: npm run test:live
+      ...common,
+      displayName: 'live',
+      testMatch: ['<rootDir>/tests/live/**/*.test.ts'],
+      setupFilesAfterEnv: ['<rootDir>/tests/helpers/integrationTimeout.ts'],
+    },
   ],
 };

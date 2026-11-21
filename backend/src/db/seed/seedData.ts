@@ -38,7 +38,9 @@ export interface SeedEvent {
   status: 'DRAFT' | 'PUBLISHED';
   startOffsetMinutes: number;
   durationMinutes: number;
-  pricing: { strategy: 'BASE' } | { strategy: 'EARLY_BIRD'; deadlineOffsetMinutes: number; discountPct: number };
+  pricing:
+    | { strategy: 'BASE' }
+    | { strategy: 'EARLY_BIRD'; deadlineOffsetMinutes: number; discountPct: number };
   seatRows: number;
   seatsPerRow: number;
   categories: SeedCategory[];
@@ -137,7 +139,8 @@ export const DEMO_EVENTS: readonly SeedEvent[] = [
     organizerKey: 'organizer',
     venueKey: 'arena',
     title: 'Classical Evening (starts soon)',
-    description: 'Short-notice recital, useful for testing the 1-hour reminder and the no-refund window.',
+    description:
+      'Short-notice recital, useful for testing the 1-hour reminder and the no-refund window.',
     status: 'PUBLISHED',
     startOffsetMinutes: 3 * HOUR,
     durationMinutes: 2 * HOUR,
@@ -164,7 +167,8 @@ export const DEMO_EVENTS: readonly SeedEvent[] = [
 
 /** Row labels A..Z, AA..AZ — matches the schema limit of 52 rows. */
 export function rowLabel(index: number): string {
-  if (!Number.isInteger(index) || index < 0 || index >= 52) throw new Error('Row index out of range');
+  if (!Number.isInteger(index) || index < 0 || index >= 52)
+    throw new Error('Row index out of range');
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   return index < 26 ? letters[index]! : `A${letters[index - 26]!}`;
 }

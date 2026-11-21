@@ -64,7 +64,10 @@ export class UnauthorizedError extends AppError {
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message = 'You do not have permission to perform this action', code: 'FORBIDDEN' | 'CORS_ORIGIN_DENIED' = 'FORBIDDEN') {
+  constructor(
+    message = 'You do not have permission to perform this action',
+    code: 'FORBIDDEN' | 'CORS_ORIGIN_DENIED' = 'FORBIDDEN',
+  ) {
     super(403, code, message);
   }
 }
@@ -76,7 +79,11 @@ export class NotFoundError extends AppError {
 }
 
 export class ConflictError extends AppError {
-  constructor(message = 'Resource conflict', code: 'CONFLICT' | 'INVALID_STATE_TRANSITION' = 'CONFLICT', options?: { cause?: unknown }) {
+  constructor(
+    message = 'Resource conflict',
+    code: 'CONFLICT' | 'INVALID_STATE_TRANSITION' = 'CONFLICT',
+    options?: { cause?: unknown },
+  ) {
     super(409, code, message, undefined, options);
   }
 }

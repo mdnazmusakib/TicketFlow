@@ -57,7 +57,10 @@ export class HealthService {
         try {
           const details = await withTimeout(probe.check(), this.options.timeoutMs);
           const latencyMs = Math.round(performance.now() - started);
-          return [probe.name, details ? { status: 'up', latencyMs, details } : { status: 'up', latencyMs }];
+          return [
+            probe.name,
+            details ? { status: 'up', latencyMs, details } : { status: 'up', latencyMs },
+          ];
         } catch (error) {
           return [
             probe.name,

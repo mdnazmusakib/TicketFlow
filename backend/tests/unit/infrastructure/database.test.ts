@@ -1,5 +1,8 @@
 import type { Pool } from 'pg';
-import { Database, isRetryableTransactionError } from '../../../src/infrastructure/database/Database';
+import {
+  Database,
+  isRetryableTransactionError,
+} from '../../../src/infrastructure/database/Database';
 import { mapPgError } from '../../../src/infrastructure/database/pgErrors';
 import { ConflictError, ValidationError } from '../../../src/shared/errors/AppError';
 
@@ -36,13 +39,20 @@ describe('Database.withTransaction', () => {
       return 'done';
     });
     expect(result).toBe('done');
-    expect(statements).toEqual(['BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE', 'SELECT 1', 'COMMIT']);
+    expect(statements).toEqual([
+      'BEGIN ISOLATION LEVEL READ COMMITTED READ WRITE',
+      'SELECT 1',
+      'COMMIT',
+    ]);
     expect(release).toHaveBeenCalledWith();
   });
 
   it('honours isolation level and read-only options', async () => {
     const { pool, statements } = fakePool(() => undefined);
-    await new Database(pool).withTransaction(async () => undefined, { isolationLevel: 'SERIALIZABLE', readOnly: true });
+    await new Database(pool).withTransaction(async () => undefined, {
+      isolationLevel: 'SERIALIZABLE',
+      readOnly: true,
+    });
     expect(statements[0]).toBe('BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY');
   });
 
@@ -135,10 +145,14 @@ describe('mapPgError', () => {
     Object.assign(new Error('raw'), { code, ...(constraint ? { constraint } : {}) });
 
   it('maps integrity violations to safe client errors', () => {
-    expect(mapPgError(withConstraint('23505', 'uq_users_email_lower'))).toBeInstanceOf(ConflictError);
+    expect(mapPgError(withConstraint('23505', 'uq_users_email_lower'))).toBeInstanceOf(
+      ConflictError,
+    );
     expect(mapPgError(withConstraint('23503', 'fk'))).toBeInstanceOf(ConflictError);
     expect(mapPgError(withConstraint('23P01'))).toBeInstanceOf(ConflictError);
-    expect(mapPgError(withConstraint('23514', 'chk_bookings_amounts'))).toBeInstanceOf(ValidationError);
+    expect(mapPgError(withConstraint('23514', 'chk_bookings_amounts'))).toBeInstanceOf(
+      ValidationError,
+    );
     expect(mapPgError(withConstraint('23502'))).toBeInstanceOf(ValidationError);
     expect(mapPgError(withConstraint('22P02'))).toBeInstanceOf(ValidationError);
     expect(mapPgError(withConstraint('23505'))?.message).toContain('unknown');

@@ -19,20 +19,20 @@ const urlWithProtocols = (protocols: readonly string[]) =>
       { message: `must be a valid URL using ${protocols.join(' or ')}` },
     );
 
-const csvList = z
-  .string()
-  .transform((value) =>
-    value
-      .split(',')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0),
-  );
+const csvList = z.string().transform((value) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0),
+);
 
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().min(1).max(65535).default(4000),
-    LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+    LOG_LEVEL: z
+      .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+      .default('info'),
     CORS_ORIGINS: csvList.pipe(
       z.array(urlWithProtocols(['http:', 'https:'])).min(1, 'at least one origin is required'),
     ),
@@ -81,7 +81,11 @@ const envSchema = z
       });
     }
     if (!env.DATABASE_SSL) {
-      ctx.addIssue({ code: 'custom', path: ['DATABASE_SSL'], message: 'must be true in production' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DATABASE_SSL'],
+        message: 'must be true in production',
+      });
     }
     if (env.CORS_ORIGINS.some((origin) => new URL(origin).protocol !== 'https:')) {
       ctx.addIssue({

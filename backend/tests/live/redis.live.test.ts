@@ -1,24 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
-import { createRedisClient } from '../../../src/infrastructure/redis/client';
-import { RedisLockManager } from '../../../src/infrastructure/redis/LockManager';
-import { RedisTtlStore } from '../../../src/infrastructure/redis/TtlStore';
-import { RedisHealthProbe } from '../../../src/repositories/HealthProbes';
+import { createRedisClient } from '../../src/infrastructure/redis/client';
+import { RedisLockManager } from '../../src/infrastructure/redis/LockManager';
+import { RedisTtlStore } from '../../src/infrastructure/redis/TtlStore';
+import { RedisHealthProbe } from '../../src/repositories/HealthProbes';
 
 /**
- * Live Redis connectivity. Runs only when TEST_REDIS_URL is set (e.g. a local
- * Redis, Upstash, or a CI service); otherwise skipped with a visible notice.
+ * Live Redis connectivity against the configured server (npm run test:live).
  * Keys use a unique prefix and are removed afterwards.
  */
 const url = process.env.TEST_REDIS_URL;
-const describeLive = url ? describe : describe.skip;
+if (!url) throw new Error('TEST_REDIS_URL is required (run via npm run test:live)');
 
-if (!url) {
-  // eslint-disable-next-line no-console
-  console.info('[redisLive] TEST_REDIS_URL not set: live Redis tests skipped');
-}
-
-describeLive('Redis (live server)', () => {
+describe('Redis (live server)', () => {
   const keyPrefix = `tftest${randomUUID().slice(0, 8)}:`;
   let redis: Redis;
 
@@ -28,7 +22,9 @@ describeLive('Redis (live server)', () => {
   });
 
   afterAll(async () => {
-    await new RedisTtlStore(redis, keyPrefix).deleteByPattern('*:*').catch(() => undefined);
+    const store = new RedisTtlStore(redis, keyPrefix);
+    await store.deleteByPattern('seat_hold:*');
+    await store.delete('otp:live@example.com', 'short');
     await redis.quit();
   });
 

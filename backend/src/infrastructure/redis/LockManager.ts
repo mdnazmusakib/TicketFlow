@@ -94,7 +94,12 @@ export class RedisLockManager implements LockManager {
 
   async release(lock: Lock): Promise<number> {
     if (lock.keys.length === 0) return 0;
-    const result = await this.redis.eval(RELEASE_SCRIPT, lock.keys.length, ...lock.keys, lock.token);
+    const result = await this.redis.eval(
+      RELEASE_SCRIPT,
+      lock.keys.length,
+      ...lock.keys,
+      lock.token,
+    );
     return Number(result);
   }
 

@@ -31,7 +31,9 @@ export class MigrationChecksumError extends Error {
   }
 }
 
-export async function loadMigrationFiles(dir: string = DEFAULT_MIGRATIONS_DIR): Promise<MigrationFile[]> {
+export async function loadMigrationFiles(
+  dir: string = DEFAULT_MIGRATIONS_DIR,
+): Promise<MigrationFile[]> {
   const entries = (await readdir(dir)).filter((file) => file.endsWith('.sql')).sort();
   const files: MigrationFile[] = [];
   const seen = new Set<string>();
@@ -85,13 +87,17 @@ export class Migrator {
           await client.query('COMMIT');
         } catch (error) {
           await client.query('ROLLBACK');
-          throw new Error(`Migration ${file.filename} failed: ${(error as Error).message}`, { cause: error });
+          throw new Error(`Migration ${file.filename} failed: ${(error as Error).message}`, {
+            cause: error,
+          });
         }
         executed.push(file.filename);
       }
       return executed;
     } finally {
-      await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => undefined);
+      await client
+        .query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY])
+        .catch(() => undefined);
       client.release();
     }
   }
@@ -106,7 +112,11 @@ export class Migrator {
       );
       const appliedVersions = new Set(rows.map((row) => row.version));
       return {
-        applied: rows.map((row) => ({ version: row.version, name: row.name, appliedAt: row.applied_at })),
+        applied: rows.map((row) => ({
+          version: row.version,
+          name: row.name,
+          appliedAt: row.applied_at,
+        })),
         pending: files
           .filter((file) => !appliedVersions.has(file.version))
           .map((file) => ({ version: file.version, name: file.name })),
@@ -126,6 +136,16 @@ export class Migrator {
       )`);
     // Never exposed through the Supabase Data API.
     await client.query('ALTER TABLE public.schema_migrations ENABLE ROW LEVEL SECURITY');
+    await client.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          REVOKE ALL ON TABLE public.schema_migrations FROM anon;
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          REVOKE ALL ON TABLE public.schema_migrations FROM authenticated;
+        END IF;
+      END $$`);
   }
 
   private async appliedChecksums(client: PoolClient): Promise<Map<string, string>> {
