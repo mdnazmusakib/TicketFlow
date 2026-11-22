@@ -79,6 +79,10 @@ const envSchema = z
 
     MAX_TICKETS_PER_USER_PER_EVENT: z.coerce.number().int().min(1).max(50).default(6),
     SEAT_HOLD_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(300),
+    /** How often the background worker releases expired holds. */
+    BOOKING_EXPIRY_INTERVAL_MS: z.coerce.number().int().min(1000).max(600000).default(15000),
+    /** Hold/checkout/cancel requests per window per IP. */
+    BOOKING_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
     DEFAULT_CURRENCY: z
       .string()
       .regex(/^[A-Z]{3}$/)
@@ -188,6 +192,8 @@ export interface AppConfig {
     maxTicketsPerUserPerEvent: number;
     seatHoldTtlSeconds: number;
     defaultCurrency: string;
+    expiryIntervalMs: number;
+    rateLimitMax: number;
   };
   rateLimit: {
     windowMs: number;
@@ -280,6 +286,8 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       maxTicketsPerUserPerEvent: env.MAX_TICKETS_PER_USER_PER_EVENT,
       seatHoldTtlSeconds: env.SEAT_HOLD_TTL_SECONDS,
       defaultCurrency: env.DEFAULT_CURRENCY,
+      expiryIntervalMs: env.BOOKING_EXPIRY_INTERVAL_MS,
+      rateLimitMax: env.BOOKING_RATE_LIMIT_MAX,
     },
     rateLimit: {
       windowMs: env.RATE_LIMIT_WINDOW_MS,

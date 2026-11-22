@@ -705,3 +705,50 @@ fieldset {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Phase 3: booking ---------- */
+.seat-selection {
+  display: grid;
+  gap: 1rem;
+}
+
+.booking-summary {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.booking-summary h3 {
+  margin-top: 0;
+}
+
+.booking-summary__total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 1.1rem;
+  gap: 1rem;
+}
+
+.countdown {
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown--urgent {
+  color: var(--color-danger);
+}
+
+.booking-page {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.timeline {
+  padding-left: 1.2rem;
+  margin: 0;
+}
+
+.timeline li {
+  padding-block: 0.3rem;
+}

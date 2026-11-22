@@ -50,6 +50,10 @@ export function createApp({ config, logger, controllers, authenticate }: AppDepe
     windowMs: config.rateLimit.windowMs,
     max: config.auth.rateLimitMax,
   });
+  const bookingLimiter = createRateLimiter({
+    windowMs: config.rateLimit.windowMs,
+    max: config.booking.rateLimitMax,
+  });
 
   app.use(
     '/api',
@@ -58,7 +62,7 @@ export function createApp({ config, logger, controllers, authenticate }: AppDepe
       max: config.rateLimit.max,
       skip: (req) => req.path.startsWith('/health'),
     }),
-    createApiRouter(controllers, { authenticate, authLimiter }),
+    createApiRouter(controllers, { authenticate, authLimiter, bookingLimiter }),
   );
 
   app.use(notFoundHandler);

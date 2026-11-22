@@ -19,6 +19,7 @@ export function Header() {
   ];
   if (user && (user.role === 'ORGANIZER' || user.role === 'ADMIN'))
     items.push({ to: '/organizer', label: 'Organizer' });
+  if (user?.role === 'CUSTOMER') items.push({ to: '/bookings', label: 'My bookings' });
   if (user) items.push({ to: '/account', label: 'Account' });
   if (status === 'anonymous') {
     items.push({ to: '/login', label: 'Sign in' }, { to: '/register', label: 'Register' });

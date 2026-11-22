@@ -28,6 +28,16 @@ module.exports = {
       setupFilesAfterEnv: ['<rootDir>/tests/helpers/integrationTimeout.ts'],
     },
     {
+      // Booking concurrency on real PostgreSQL (embedded) + the real Redis from backend/.env.
+      // Run with: npm run test:concurrency
+      ...common,
+      displayName: 'concurrency',
+      testMatch: ['<rootDir>/tests/concurrency/**/*.test.ts'],
+      globalSetup: '<rootDir>/tests/helpers/globalSetup.mjs',
+      globalTeardown: '<rootDir>/tests/helpers/globalTeardown.mjs',
+      setupFilesAfterEnv: ['<rootDir>/tests/helpers/integrationTimeout.ts'],
+    },
+    {
       // Real Supabase + Redis from backend/.env. Run with: npm run test:live
       ...common,
       displayName: 'live',

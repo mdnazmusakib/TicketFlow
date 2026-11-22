@@ -354,17 +354,21 @@ Defined once in code (`backend/src/domain/lifecycle/bookingStateMachine.ts`) and
 
 Seat allocations: `HELD → BOOKED | RELEASED`, `BOOKED → RELEASED`; `RELEASED` is terminal (`enforce_booking_seat_state_transition()`), and price/seat/booking are immutable.
 
-### 5.2 Seat hold (implemented in a later phase, enabled by this schema)
+### 5.2 Seat hold (implemented in Phase 3: `BookingService.hold`)
 
 1. Expire stale holds for the event (§5.3).
-2. Acquire Redis locks `seat_hold:{eventId}:{seatId}` all-or-nothing (Lua script, owner token, TTL 300 s).
+2. Acquire Redis locks `seat_hold:{eventId}:{seatId}` all-or-nothing (Lua script). The lock value is the new booking id; the TTL is 15 s while the transaction runs and is extended to the hold expiry after commit, so a crashed request frees seats within seconds. Locks whose owner booking is no longer active are reclaimed. If Redis is unreachable the hold continues on PostgreSQL alone.
 3. `BEGIN`; take `SELECT … FROM events WHERE id = $1 FOR SHARE` (organizer edits lock the event row `FOR UPDATE`, so a hold can never race a seat-map rebuild or reschedule), then `pg_advisory_xact_lock` on `(customer_id, event_id)` to serialise one customer's parallel requests; count active seats (`HELD`/`BOOKED` rows of active bookings) and reject if `count + requested > MAX_TICKETS_PER_USER_PER_EVENT` (default 6).
-4. Insert `bookings` (`HELD`, `hold_expires_at = now() + 300 s`, server-computed total) and `booking_seats` (`HELD`, price snapshot); `idx_active_seat_per_event` is the final guard.
-5. Insert history `NULL → HELD`; `COMMIT`; release only locks owned by this token (compare-and-delete).
+4. Insert `bookings` (`HELD`, `hold_expires_at = now() + 300 s` using the database clock, server-computed total via the pricing strategy, `pricing_strategy` = strategy actually applied) and `booking_seats` (`HELD`, discounted unit price snapshot); `idx_active_seat_per_event` is the final guard (a violation becomes `409 SEATS_UNAVAILABLE`).
+5. Insert history `NULL → HELD`; `COMMIT`. On any failure the transaction rolls back and only locks owned by this booking id are released (compare-and-delete). An optional `Idempotency-Key` header (unique per customer) turns retries into replays of the same hold.
+
+Availability counts a seat as taken while its allocation is `BOOKED`, or `HELD` with an unexpired hold, so an expired hold frees the seat for display even before the worker runs.
 
 ### 5.3 Hold expiry
 
-Worker selects `bookings WHERE status IN ('HELD','PENDING_PAYMENT') AND hold_expires_at <= now()` using `idx_bookings_hold_expiry` with `FOR UPDATE SKIP LOCKED`, and per booking in one transaction: status → `EXPIRED` + `expired_at`, seats → `RELEASED` + `released_at`, history row, then deletes the Redis locks.
+`BookingExpiryWorker` (every `BOOKING_EXPIRY_INTERVAL_MS`, default 15 s, plus once at startup) selects `bookings WHERE status IN ('HELD','PENDING_PAYMENT') AND hold_expires_at <= now()` using `idx_bookings_hold_expiry` with `FOR UPDATE SKIP LOCKED` in batches, and per booking in one transaction: status → `EXPIRED` + `expired_at`, seats → `RELEASED` + `released_at`, history row; after commit it releases the Redis locks. Passes never overlap, failures are retried next tick, and several instances can run at once. The hold flow and checkout/confirm also expire due holds inline, so correctness never waits for the worker.
+
+In Phase 3, `PENDING_PAYMENT` (checkout) keeps the original 5-minute expiry; all status changes go through `BookingLifecycle.transition`, which validates the state machine, applies the seat effect (`CONFIRMED`: HELD→BOOKED; `EXPIRED`/`CANCELLED`: →RELEASED) and appends history in the same transaction.
 
 ### 5.4 Confirmation
 

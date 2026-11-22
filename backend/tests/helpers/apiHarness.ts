@@ -4,7 +4,9 @@ import request from 'supertest';
 import type TestAgent from 'supertest/lib/agent';
 import type { Express } from 'express';
 import { createApp } from '../../src/app';
-import { buildContainer } from '../../src/container';
+import { buildContainer, type Container } from '../../src/container';
+import { createRedisClient } from '../../src/infrastructure/redis/client';
+import { RedisTtlStore } from '../../src/infrastructure/redis/TtlStore';
 import type { EmailMessage, EmailSender } from '../../src/domain/notifications/email';
 import { captureLogger, testConfig } from './testApp';
 import { createTestDatabase, type TestDatabase } from './testDatabase';
@@ -30,6 +32,10 @@ export interface ApiHarness {
   testDb: TestDatabase;
   redis: Redis;
   emails: InMemoryEmailSender;
+  container: Container;
+  keyPrefix: string;
+  /** True when backed by a real Redis server (TEST_REDIS_URL). */
+  realRedis: boolean;
   close(): Promise<void>;
 }
 
@@ -37,18 +43,23 @@ let redisDb = 0;
 
 /** Full app on a fresh migrated PostgreSQL database + an isolated in-memory Redis. */
 export async function createApiHarness(
-  options: { otpBypass?: boolean; env?: Record<string, string> } = {},
+  options: { otpBypass?: boolean; env?: Record<string, string>; redisUrl?: string } = {},
 ): Promise<ApiHarness> {
   const testDb = await createTestDatabase({ migrate: true });
   // Distinct keyPrefix keeps ioredis-mock instances (which share data) isolated per harness.
   redisDb += 1;
   const config = testConfig({
-    REDIS_KEY_PREFIX: `h${process.pid}x${redisDb}:`,
+    REDIS_KEY_PREFIX: `h${process.pid}x${redisDb}x${Date.now().toString(36)}:`,
     AUTH_RATE_LIMIT_MAX: '10000',
     RATE_LIMIT_MAX: '10000',
+    BOOKING_RATE_LIMIT_MAX: '10000',
     ...options.env,
   });
-  const redis = new RedisMock({ keyPrefix: config.redis.keyPrefix }) as unknown as Redis;
+  const realRedis = Boolean(options.redisUrl);
+  const redis = options.redisUrl
+    ? createRedisClient({ url: options.redisUrl, keyPrefix: config.redis.keyPrefix })
+    : (new RedisMock({ keyPrefix: config.redis.keyPrefix }) as unknown as Redis);
+  if (realRedis) await redis.connect();
   const emails = new InMemoryEmailSender();
   const container = buildContainer(config, captureLogger().logger, {
     db: testDb.db,
@@ -67,8 +78,20 @@ export async function createApiHarness(
     testDb,
     redis,
     emails,
+    container,
+    keyPrefix: config.redis.keyPrefix,
+    realRedis,
     async close() {
-      redis.disconnect();
+      await container.expiryWorker.stop();
+      if (realRedis) {
+        // Remove every key this harness created on the shared server.
+        await new RedisTtlStore(redis, config.redis.keyPrefix)
+          .deleteByPattern('*:*')
+          .catch(() => undefined);
+        await redis.quit();
+      } else {
+        redis.disconnect();
+      }
       await testDb.drop();
     },
   };

@@ -2,7 +2,7 @@
 
 Event ticket booking platform: organizers publish events with seat maps and pricing strategies, customers hold seats (5-minute holds, max 6 tickets per event), pay through pluggable gateways and get email + in-app notifications.
 
-> **Status: Phase 2 complete.** Foundation (Phase 1) plus authentication with email OTP, role-based authorization with ownership checks, organizer venue/event/seat-map management and public event discovery. Booking, payments and notifications arrive in later phases.
+> **Status: Phase 3 complete.** Foundation, authentication/authorization, event management, discovery, plus server-side pricing (base and early-bird strategies), 5-minute seat holds with Redis coordination and PostgreSQL as the authority, the 6-ticket limit, the booking lifecycle with history, and a background expiry worker. Payments and notifications arrive in later phases.
 
 ## Demo credentials
 
@@ -98,6 +98,8 @@ npm run dev:frontend                         # http://localhost:5173 (proxies /a
 | `OTP_RESEND_COOLDOWN_SECONDS` | no (60) | Minimum gap between OTP emails |
 | `AUTH_RATE_LIMIT_MAX` | no (30) | Requests per window per IP on `/api/auth/*` |
 | `EMAIL_TRANSPORT` | no (console) | `console` prints emails (incl. OTPs) to the backend terminal; `smtp` is required in production |
+| `BOOKING_EXPIRY_INTERVAL_MS` | no (15000) | How often expired holds are released |
+| `BOOKING_RATE_LIMIT_MAX` | no (60) | Hold/checkout/cancel requests per window per IP |
 | `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | for smtp | Mail server settings |
 
 The server validates every variable at startup and exits listing invalid names (never values).
@@ -115,6 +117,7 @@ The server validates every variable at startup and exits listing invalid names (
 | `npm run db:migrate` · `npm run db:migrate:status -w backend` | Apply / list migrations |
 | `npm run db:seed` | Idempotent demo seed |
 | `npm run test:live -w backend` | Live checks against the Supabase + Redis in `backend/.env` |
+| `npm run test:concurrency -w backend` | Booking concurrency suite on real PostgreSQL (embedded) + the real Redis in `backend/.env` |
 
 ## API
 
@@ -129,6 +132,10 @@ The server validates every variable at startup and exits listing invalid names (
 | GET | `/api/auth/me` | Current user |
 | GET | `/api/events` | Public list: `q, city, from, to (YYYY-MM-DD), sort=date|price|title|newest, order, page, pageSize` |
 | GET | `/api/events/cities` · `/api/events/:id` · `/api/events/:id/seats` | Cities, details with categories, seat availability |
+| POST | `/api/bookings/quote` | `{ eventId, seatIds }` → server-side price (strategy, discounts, total) |
+| POST | `/api/bookings` | Customer hold for 5 minutes; optional `Idempotency-Key` header; 409 `SEATS_UNAVAILABLE` / `TICKET_LIMIT_EXCEEDED` |
+| GET | `/api/bookings` · `/api/bookings/:id` | My bookings (status filter, pages) / booking with seats and status history |
+| POST | `/api/bookings/:id/checkout` · `/api/bookings/:id/cancel` | HELD → PENDING_PAYMENT / HELD or PENDING_PAYMENT → CANCELLED |
 | * | `/api/organizer/venues[/:id]` | Venue CRUD (ORGANIZER own / ADMIN all) |
 | * | `/api/organizer/events[/:id]` | Event CRUD, `PUT …/seat-map`, `PATCH …/categories/:categoryId`, `PATCH …/seats/category`, `POST …/publish|unpublish|cancel` |
 
@@ -141,6 +148,14 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 - **Live** (`backend/tests/live`): read-only checks against your Supabase and Redis (migrated schema, RLS/privilege lockdown, demo data, real transaction rolled back, Redis locks/TTL).
 - **Frontend** (`frontend/tests`): API client, auth flows (login, register, OTP, protected routes, open-redirect guard), events list/details, organizer venues/events/seat map editor, error boundaries.
 - **Auth & authorization coverage** (`backend/tests/integration/api`): OTP hashing, expiry, attempt limit, replay, resend cooldown, bypass mode, cookie flags, forged/`alg:none`/revoked tokens, RBAC (401/403), IDOR on venues and events (404), destructive-change guards with active bookings, public discovery filters and data exposure.
+
+## Testing seat booking on localhost
+
+1. Start both apps, sign in as `customer.demo@example.com` and open an event (e.g. "Chattogram Tech Summit", which has an early-bird discount).
+2. Click seats (max 6). The summary shows the server-calculated price; click **Hold … seats for 5 minutes**.
+3. The booking page shows the countdown. **Continue to payment** moves it to "Awaiting payment"; **Cancel booking** releases the seats.
+4. Open the same event in a private window as `customer2.demo@example.com`: held seats show as unavailable (availability refreshes every 10 s), and picking a just-taken seat returns a clear "just taken" message.
+5. Let a hold run out: the countdown reaches zero, the page shows "expired", and the worker releases the seats within ~15 s.
 
 ## Testing authentication and authorization on localhost
 

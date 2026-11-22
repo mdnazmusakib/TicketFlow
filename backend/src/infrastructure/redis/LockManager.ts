@@ -9,8 +9,11 @@ export interface Lock {
 
 /** Abstraction used by services; Redis is one implementation (DIP). */
 export interface LockManager {
-  /** All-or-nothing acquisition of every key. Returns null if any key is taken. */
-  acquire(keys: readonly string[], ttlMs: number): Promise<Lock | null>;
+  /**
+   * All-or-nothing acquisition of every key. Returns null if any key is taken.
+   * `token` identifies the owner (e.g. a booking id); random when omitted.
+   */
+  acquire(keys: readonly string[], ttlMs: number, token?: string): Promise<Lock | null>;
   /** Releases only keys still owned by this lock's token. Returns the count released. */
   release(lock: Lock): Promise<number>;
   /** Extends the TTL only if every key is still owned by this lock. */
@@ -79,9 +82,12 @@ function normalize(keys: readonly string[], ttlMs: number): string[] {
 export class RedisLockManager implements LockManager {
   constructor(private readonly redis: Redis) {}
 
-  async acquire(keys: readonly string[], ttlMs: number): Promise<Lock | null> {
+  async acquire(
+    keys: readonly string[],
+    ttlMs: number,
+    token: string = randomUUID(),
+  ): Promise<Lock | null> {
     const uniqueKeys = normalize(keys, ttlMs);
-    const token = randomUUID();
     const result = await this.redis.eval(
       ACQUIRE_SCRIPT,
       uniqueKeys.length,

@@ -6,21 +6,19 @@ import { ApiError, toErrorMessage } from '../../lib/apiClient';
 import { formatDateTime, formatMoney } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import { eventsApi as defaultApi, type EventsApi } from './eventsApi';
-import { SeatGrid } from './SeatGrid';
+import type { BookingsApi } from '../bookings/bookingsApi';
+import { SeatSelection } from '../bookings/SeatSelection';
 
-export function EventDetailPage({ api = defaultApi }: { api?: EventsApi }) {
+export function EventDetailPage({
+  api = defaultApi,
+  bookingsApi,
+}: {
+  api?: EventsApi;
+  bookingsApi?: BookingsApi;
+}) {
   const { id = '' } = useParams();
   const details = useAsync(
-    useCallback(
-      async (signal: AbortSignal) => {
-        const [event, availability] = await Promise.all([
-          api.details(id, signal),
-          api.availability(id, signal),
-        ]);
-        return { event, availability };
-      },
-      [api, id],
-    ),
+    useCallback((signal: AbortSignal) => api.details(id, signal), [api, id]),
     id,
   );
 
@@ -40,7 +38,7 @@ export function EventDetailPage({ api = defaultApi }: { api?: EventsApi }) {
     return <ErrorMessage message={toErrorMessage(details.error)} onRetry={details.reload} />;
   }
 
-  const { event, availability } = details.data;
+  const event = details.data;
   return (
     <article className="event-detail">
       <header className="card">
@@ -86,9 +84,12 @@ export function EventDetailPage({ api = defaultApi }: { api?: EventsApi }) {
       </section>
 
       <section className="card">
-        <h2>Seat map</h2>
-        <SeatGrid seats={availability.seats} categories={availability.categories} />
-        <p className="muted">Seat selection and booking open in the next release.</p>
+        <h2>Choose your seats</h2>
+        <SeatSelection
+          eventId={event.id}
+          eventsApi={api}
+          {...(bookingsApi ? { bookingsApi } : {})}
+        />
       </section>
     </article>
   );

@@ -127,7 +127,9 @@ describe('EventDetailPage', () => {
     renderRoute(<EventDetailPage api={api} />, { path: '/events/:id', at: '/events/e1' });
     expect(await screen.findByRole('heading', { name: 'Rock Night' })).toBeInTheDocument();
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
-    expect(screen.getByRole('gridcell', { name: 'Row A seat 2, unavailable' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('gridcell', { name: 'Row A seat 2, unavailable' }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Early bird: 20% off/)).toBeInTheDocument();
     expect(api.details).toHaveBeenCalledWith('e1', expect.anything());
   });

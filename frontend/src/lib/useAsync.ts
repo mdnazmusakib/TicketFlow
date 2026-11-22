@@ -12,7 +12,7 @@ export type AsyncState<T> =
 export function useAsync<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   key = '',
-): AsyncState<T> & { reload: () => void } {
+): AsyncState<T> & { reload: () => void; refresh: () => void } {
   const [state, setState] = useState<AsyncState<T>>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [lastKey, setLastKey] = useState(key);
@@ -46,5 +46,8 @@ export function useAsync<T>(
     setAttempt((n) => n + 1);
   }, []);
 
-  return { ...state, reload };
+  /** Re-fetches without resetting to "loading" (keeps showing current data). */
+  const refresh = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return { ...state, reload, refresh };
 }

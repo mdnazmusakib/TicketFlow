@@ -39,6 +39,7 @@ async function main(): Promise<void> {
   const server: Server = app.listen(config.port, () => {
     logger.info({ port: config.port, env: config.nodeEnv }, 'TicketFlow API listening');
   });
+  container.expiryWorker.start();
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
 

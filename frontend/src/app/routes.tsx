@@ -2,6 +2,8 @@ import type { RouteObject } from 'react-router';
 import { RouteError } from '../components/feedback/RouteError';
 import { AppLayout } from '../components/layout/AppLayout';
 import { AccountPage } from '../features/account/AccountPage';
+import { BookingDetailPage } from '../features/bookings/BookingDetailPage';
+import { MyBookingsPage } from '../features/bookings/MyBookingsPage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ProtectedRoute } from '../features/auth/ProtectedRoute';
 import { RegisterPage } from '../features/auth/RegisterPage';
@@ -30,7 +32,11 @@ export const routes: RouteObject[] = [
       { path: 'verify-email', element: <VerifyOtpPage /> },
       {
         element: <ProtectedRoute />,
-        children: [{ path: 'account', element: <AccountPage /> }],
+        children: [
+          { path: 'account', element: <AccountPage /> },
+          { path: 'bookings', element: <MyBookingsPage /> },
+          { path: 'bookings/:id', element: <BookingDetailPage /> },
+        ],
       },
       {
         path: 'organizer',

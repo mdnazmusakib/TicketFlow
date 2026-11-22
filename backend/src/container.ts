@@ -3,6 +3,7 @@ import type Redis from 'ioredis';
 import type { Logger } from 'pino';
 import type { AppConfig } from './config/env';
 import { AuthController } from './controllers/AuthController';
+import { BookingController } from './controllers/BookingController';
 import {
   OrganizerEventController,
   PublicEventController,
@@ -10,6 +11,7 @@ import {
 } from './controllers/EventController';
 import { HealthController } from './controllers/HealthController';
 import type { EmailSender } from './domain/notifications/email';
+import { PricingStrategyRegistry } from './domain/pricing/PricingStrategy';
 import { Database } from './infrastructure/database/Database';
 import { createPool } from './infrastructure/database/pool';
 import { ConsoleEmailSender } from './infrastructure/email/ConsoleEmailSender';
@@ -19,6 +21,7 @@ import { RedisLockManager, type LockManager } from './infrastructure/redis/LockM
 import { RedisTtlStore, type TtlStore } from './infrastructure/redis/TtlStore';
 import { BcryptPasswordHasher } from './infrastructure/security/PasswordHasher';
 import { createAuthenticate } from './middlewares/auth';
+import { BookingRepository } from './repositories/BookingRepository';
 import { EventRepository } from './repositories/EventRepository';
 import { PostgresHealthProbe, RedisHealthProbe } from './repositories/HealthProbes';
 import { SeatMapRepository } from './repositories/SeatMapRepository';
@@ -27,11 +30,16 @@ import { VenueRepository } from './repositories/VenueRepository';
 import { AuthService } from './services/auth/AuthService';
 import { OtpService } from './services/auth/OtpService';
 import { TokenService } from './services/auth/TokenService';
+import { BookingExpiryService } from './services/booking/BookingExpiryService';
+import { BookingLifecycle } from './services/booking/BookingLifecycle';
+import { BookingService } from './services/booking/BookingService';
+import { SeatLockCoordinator } from './services/booking/SeatLockCoordinator';
 import { EventDiscoveryService } from './services/events/EventDiscoveryService';
 import { EventService } from './services/events/EventService';
 import { VenueService } from './services/events/VenueService';
 import { HealthService } from './services/HealthService';
 import { APP_VERSION } from './version';
+import { BookingExpiryWorker } from './workers/BookingExpiryWorker';
 
 export interface Controllers {
   health: HealthController;
@@ -39,6 +47,7 @@ export interface Controllers {
   venues: VenueController;
   organizerEvents: OrganizerEventController;
   publicEvents: PublicEventController;
+  bookings: BookingController;
 }
 
 export interface Infrastructure {
@@ -52,6 +61,8 @@ export interface Container {
   infrastructure: Infrastructure;
   controllers: Controllers;
   authenticate: RequestHandler;
+  services: { bookings: BookingService; bookingExpiry: BookingExpiryService };
+  expiryWorker: BookingExpiryWorker;
   /** Connects to Redis and verifies PostgreSQL. Fails fast on startup. */
   start(): Promise<void>;
   /** Closes every connection; safe to call more than once. */
@@ -132,6 +143,39 @@ export function buildContainer(
   });
   const discoveryService = new EventDiscoveryService(events, seatMaps);
 
+  // Booking
+  const bookingRepository = new BookingRepository(db);
+  const lifecycle = new BookingLifecycle(bookingRepository);
+  const seatLocks = new SeatLockCoordinator(infrastructure.lockManager, ttlStore, {
+    acquireTtlMs: 15_000,
+    logger,
+    isBookingActive: (bookingId) => bookingRepository.isLockOwnerActive(db, bookingId),
+  });
+  const bookingExpiry = new BookingExpiryService(
+    db,
+    bookingRepository,
+    lifecycle,
+    seatLocks,
+    logger,
+  );
+  const bookingService = new BookingService(
+    db,
+    bookingRepository,
+    lifecycle,
+    bookingExpiry,
+    seatLocks,
+    new PricingStrategyRegistry(),
+    {
+      maxTicketsPerUserPerEvent: config.booking.maxTicketsPerUserPerEvent,
+      holdTtlSeconds: config.booking.seatHoldTtlSeconds,
+      logger,
+    },
+  );
+  const expiryWorker = new BookingExpiryWorker(bookingExpiry, {
+    intervalMs: config.booking.expiryIntervalMs,
+    logger,
+  });
+
   let closed = false;
 
   return {
@@ -143,7 +187,10 @@ export function buildContainer(
       venues: new VenueController(venueService),
       organizerEvents: new OrganizerEventController(eventService),
       publicEvents: new PublicEventController(discoveryService),
+      bookings: new BookingController(bookingService),
     },
+    services: { bookings: bookingService, bookingExpiry },
+    expiryWorker,
     async start() {
       if (redis.status === 'wait') await redis.connect();
       await db.ping();
@@ -151,6 +198,7 @@ export function buildContainer(
     async close() {
       if (closed) return;
       closed = true;
+      await expiryWorker.stop();
       await Promise.allSettled([db.close(), redis.quit()]);
     },
   };
