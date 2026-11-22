@@ -49,4 +49,4 @@ Build **TicketFlow**, an event ticket booking platform (similar to Ticketmaster 
 - **Dashboards**: customers get a dashboard (bookings, payments, refunds, notifications); organizers get sales, occupancy and per-event booking overviews (customer emails masked).
 - **File uploads**: implemented for event banner images (JPEG/PNG/WebP, ≤ 2 MB, content-verified, random file names).
 - **Reminders**: sent when the event starts between 1 hour and `REMINDER_WINDOW_MINUTES` (default 2 hours) from now, so they always arrive at least 1 hour before the start, exactly once.
-- **Deployment**: single Docker service (API + web app on one origin) on Render, Supabase PostgreSQL, managed Redis; GitHub Actions deploys `main` through a deploy hook after all checks pass. Live hosting is configured by the repository owner (see `COMPLIANCE_MATRIX.md`).
+- **Deployment (free tier, no Docker)**: API on Render (native Node, deploys `main` after CI checks pass), web app on Vercel (deploys `main`; proxies `/api` so the session cookie stays first-party), Supabase PostgreSQL + Storage, Upstash Redis. Live hosting is configured by the repository owner (see `COMPLIANCE_MATRIX.md`).

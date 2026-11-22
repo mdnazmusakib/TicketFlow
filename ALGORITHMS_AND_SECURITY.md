@@ -43,14 +43,14 @@ This document describes what is **implemented** (file references point to `backe
 4. After commit the gateway refund runs; failures retry with backoff up to `REFUND_MAX_ATTEMPTS`; each attempt reuses its idempotency key so a re-sent request cannot refund twice.
 
 ### 1.7 Image upload validation (`domain/uploads/images.ts`, `services/events/EventBannerService.ts`)
-Multer keeps the file in memory (1 file, no other fields, ≤ 2 MB) and rejects MIME types other than JPEG/PNG/WebP. The service then reads the **bytes**: JPEG `FF D8 FF … FF D9`, PNG signature + `IHDR`, WebP `RIFF…WEBP` + `VP8/VP8L/VP8X` with a consistent RIFF size; the detected type must equal the declared one. The file is stored as `<random uuid>.<ext>`; the client file name is never used. `LocalFileStorage` only accepts keys matching that pattern and verifies the resolved path stays inside the upload root, and never overwrites. Images are served with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and the exact image content type.
+Multer keeps the file in memory (1 file, no other fields, ≤ 2 MB) and rejects MIME types other than JPEG/PNG/WebP. The service then reads the **bytes**: JPEG `FF D8 FF … FF D9`, PNG signature + `IHDR`, WebP `RIFF…WEBP` + `VP8/VP8L/VP8X` with a consistent RIFF size; the detected type must equal the declared one. The file is stored as `<random uuid>.<ext>`; the client file name is never used. Both storage drivers only accept keys matching that pattern and never overwrite: `LocalFileStorage` also verifies the resolved path stays inside the upload root; `SupabaseFileStorage` writes to a private bucket with the server-side service-role key (redacted from logs). Images are served with `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and the exact image content type.
 
 ## 2. Security controls
 
 | Area | Control |
 | --- | --- |
 | Passwords | bcrypt (`BCRYPT_SALT_ROUNDS` 10–15, default 12); password strength rules; generic "invalid email or password" |
-| Sessions | HS256 JWT (algorithm pinned on verify) in an `httpOnly`, `SameSite=Lax` cookie, `Secure` in production (enforced); `jti` denylisted in Redis on logout |
+| Sessions | HS256 JWT (algorithm pinned on verify) in an `httpOnly`, `SameSite=Lax` cookie, `Secure` in production (enforced), host-only (no `Domain`); `jti` denylisted in Redis on logout. With the Vercel → Render proxy the cookie is first-party; `COOKIE_SAMESITE=none` exists only for a cross-site frontend without a proxy and is refused unless `Secure` |
 | OTP | CSPRNG, hashed at rest, 5-minute TTL, attempt limit, single use, resend cooldown, bypass impossible in production |
 | Authorization | `requireRole` per route (`CUSTOMER`, `ORGANIZER`, `ADMIN`); ownership checks in services; foreign bookings/events/venues/notifications answer **404** (no IDOR oracle); admin APIs check the role in the router and the service |
 | Input | Zod schemas for body, query and params on every route; JSON body limit 100 kB; urlencoded bodies accepted only on provider callback routes |
@@ -64,7 +64,7 @@ Multer keeps the file in memory (1 file, no other fields, ≤ 2 MB) and rejects 
 | Logging | Pino with redaction of passwords, hashes, tokens, cookies, authorization headers, OTPs, secrets, card fields, store passwords, `verify_sign`, payment tokens, connection strings; request ids on every response |
 | Errors | central handler; generic message for 5xx; stack traces only when `NODE_ENV=development` |
 | Configuration | all settings validated at startup; production refuses console email, OTP bypass, insecure cookies, non-TLS DB, http origins/API URL, debug logging, placeholder JWT secrets |
-| Secrets | only in `backend/.env` (git- and docker-ignored) or the hosting dashboard / GitHub secrets; CI fails if a `.env` file is committed; Supabase Data API locked (RLS on every table, `anon`/`authenticated` privileges revoked) |
+| Secrets | only in `backend/.env` (git-ignored) or the Render/Vercel dashboards / GitHub secrets; CI fails if a `.env` file is committed; Supabase Data API locked (RLS on every table, `anon`/`authenticated` privileges revoked) |
 
 ## 3. Phase 6 security audit summary
 
@@ -83,3 +83,5 @@ Multer keeps the file in memory (1 file, no other fields, ≤ 2 MB) and rejects 
 | Webhooks / idempotency / replay | Signatures, provider validation, dedupe, idempotency keys | Verified, including real SSLCommerz sandbox (`npm run test:sandbox`) |
 | Dependency / AI review | `anthropics/claude-code-security-review` workflow added for PRs | Runs once `CLAUDE_API_KEY` is configured (not yet run) |
 | Strix scan | Listed in the TRD as an engineering aid | **Not run** in this environment (see COMPLIANCE_MATRIX.md) |
+| Separate frontend/backend domains | `*.vercel.app` and `*.onrender.com` are different sites: an API cookie would be third-party (blocked by Safari/privacy modes) | **Fixed by design**: Vercel rewrites `/api` and `/uploads` to the API (first-party cookie, `SameSite=Lax`); CORS allowlists the Vercel origin; `SameSite=None` only with `Secure` |
+| Ephemeral disk on Render free | Uploaded banners would be lost on restart/spin-down | **Fixed**: `STORAGE_DRIVER=supabase` (private Supabase Storage bucket); production warns when local storage is used |

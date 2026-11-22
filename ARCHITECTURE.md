@@ -2,23 +2,22 @@
 
 ## 1. System overview
 
-```text
-                ┌──────────────────────────── single Docker container ───────────────────────────┐
- Browser ──────▶│  Express 5 app                                                                 │
- (React SPA)    │   ├─ /            built React app (strict CSP, SPA fallback)                    │
-                │   ├─ /api/*       JSON API (Helmet default-src 'none', CORS allowlist, limits)  │
-                │   ├─ /uploads/*   banner images (nosniff, sandboxed)                            │
-                │   └─ workers      hold expiry · notification outbox + reminders                 │
-                └───────────┬──────────────────────────┬──────────────────────────┬──────────────┘
-                            │ pg (TLS)                 │ ioredis (TLS)            │ HTTPS
-                            ▼                          ▼                          ▼
-                 Supabase PostgreSQL 17         Redis (Upstash etc.)       SSLCommerz · SMTP
-                 source of truth: bookings,     seat-hold locks, OTPs,     payments/refunds,
-                 seats, payments, outbox        session revocation,        IPN → /api/payments/
-                                                rate-limit counters        webhooks/SSLCOMMERZ
+```mermaid
+flowchart LR
+  B[Browser<br/>React SPA] -->|"https://app.vercel.app<br/>pages + /api/* + /uploads/*"| V[Vercel<br/>static build + rewrites]
+  V -->|"proxy /api, /uploads"| R[Render web service<br/>Express API + workers]
+  P[SSLCommerz] -->|"IPN + browser returns<br/>(PUBLIC_API_URL)"| R
+  R -->|"pg over TLS"| DB[(Supabase PostgreSQL<br/>source of truth)]
+  R -->|"rediss://"| RD[(Redis<br/>locks, OTPs, revocation,<br/>rate limits)]
+  R -->|"REST"| ST[(Supabase Storage<br/>banner images)]
+  R -->|"HTTPS"| P
+  R -->|"SMTP"| M[Mail provider]
 ```
 
-In development the React app runs on Vite (`:5173`) and proxies `/api` to the API (`:4000`), so cookies are always same-origin.
+- The browser only talks to the Vercel domain; Vercel forwards `/api/*` and `/uploads/*` to the API, so the httpOnly session cookie is first-party (`SameSite=Lax`, `Secure`).
+- The API process also runs the background workers (hold expiry, notification outbox + reminders).
+- Optional single-host mode: `FRONTEND_DIST_DIR` lets the API serve the built web app itself (used by the Playwright stack).
+- In development the React app runs on Vite (`:5173`) and proxies `/api` to the API (`:4000`).
 
 ## 2. Backend layers
 
@@ -71,7 +70,7 @@ Lock booking → verify any open attempt first → decide refund (`> 24 h` befor
 - `IntervalWorker` (every `NOTIFICATION_WORKER_INTERVAL_MS`): `ReminderService.scheduleDue()` claims confirmed bookings starting between 1 hour and `REMINDER_WINDOW_MINUTES` from now (`FOR UPDATE SKIP LOCKED`, sets `reminder_sent_at`) → `NotificationDispatcher.deliverDue()` claims due rows with a lease, delivers through the channel, retries failures with exponential backoff, skips reminders whose event already started.
 
 ### 4.5 Banner upload
-`multer` (memory, 1 file, ≤ 2 MB, MIME allowlist) → `EventBannerService.validate` (magic bytes must match the declared type) → random `<uuid>.<ext>` key → `FileStorage.put` (path confined to the upload root, never overwrites) → event row updated in a transaction (ownership + editable status) → old file removed.
+`multer` (memory, 1 file, ≤ 2 MB, MIME allowlist) → `EventBannerService.validate` (magic bytes must match the declared type) → random `<uuid>.<ext>` key → `FileStorage.put` (`LocalFileStorage`: path confined to the upload root; `SupabaseFileStorage`: private bucket; neither overwrites) → event row updated in a transaction (ownership + editable status) → old file removed.
 
 ## 5. Frontend
 
@@ -84,5 +83,5 @@ PostgreSQL is the source of truth; Redis only coordinates (locks, TTLs, counters
 ## 7. Testing and delivery
 
 - Jest unit + integration on a real PostgreSQL (embedded locally, a service container in CI), concurrency suite with real Redis, live checks, SSLCommerz sandbox suite, frontend Testing Library suites, Playwright journeys on a self-contained stack.
-- GitHub Actions: quality (lint, format, typecheck, build, no committed `.env`), backend tests + coverage, concurrency (PostgreSQL + Redis services), frontend tests + coverage, Playwright, Claude Code security review on PRs, deploy hook on `main`.
-- Deployment: Docker image (API + web app), Supabase, managed Redis; migrations run before each deploy.
+- GitHub Actions: quality (lint, format, typecheck, build, no committed `.env`), backend tests + coverage, concurrency (PostgreSQL + Redis services), frontend tests + coverage, Playwright, Claude Code security review on PRs.
+- Deployment: Render native Node web service (API, deploys `main` after CI passes, migrations at the end of the build), Vercel (web app, deploys `main` on push), Supabase PostgreSQL + Storage, managed Redis.

@@ -4,7 +4,7 @@ Audit date: 2026-11-22 (end of Phase 6). Sources: `PRD.md`, `TRD.md`, `.claude/C
 
 Status meanings: **COMPLETE** = implemented and verified by tests or a live run · **PARTIAL** = implemented but a part is missing or unproven · **MISSING** = not done · **NOT VERIFIED** = implemented but could not be executed in this environment.
 
-Verification run for this audit: lint, Prettier, typecheck, build clean; backend unit + integration **353/353**; frontend **93/93**; concurrency (PostgreSQL + real Redis) **8/8**; live Supabase/Redis **7/7**; SSLCommerz sandbox **10/10**; Playwright **6/6**; schema report "Schema consistent" (live Supabase = migrations = `DATABASE_DESIGN.md`); production-mode smoke against live Supabase/Redis (health, CSP/HSTS headers, generic errors). Coverage: backend 93.9 % statements / 81.3 % branches, frontend 91.6 % / 82.7 %.
+Verification run for this audit: lint, Prettier, typecheck, build clean; backend unit + integration **359/359**; frontend **93/93**; concurrency (PostgreSQL + real Redis) **8/8**; live Supabase/Redis **7/7**; SSLCommerz sandbox **10/10**; Playwright **6/6**; schema report "Schema consistent" (live Supabase = migrations = `DATABASE_DESIGN.md`); production-mode smoke against live Supabase/Redis (health, CSP/HSTS headers, generic errors). Coverage: backend 93.9 % statements / 81.3 % branches, frontend 91.6 % / 82.7 %.
 
 ## 1. Functional requirements (PRD §3)
 
@@ -57,10 +57,12 @@ Verification run for this audit: lint, Prettier, typecheck, build clean; backend
 | Strict CORS | COMPLETE | CORS tests (disallowed origin rejected) |
 | Redacted logger | COMPLETE | logger redaction tests |
 | Production debug disabled, no sensitive info exposed | COMPLETE | config rules (log level, stack traces dev-only); production smoke |
-| No secrets committed | COMPLETE | `.gitignore`, `.dockerignore`, CI check; no secrets in code |
+| No secrets committed | COMPLETE | `.gitignore` excludes all `.env*` (except `.env.example`), CI check; secrets only in Render/Vercel/GitHub dashboards |
 | XSS / CSRF protections | COMPLETE | CSP (API + SPA), SameSite + Origin allowlist; SPA tests |
 | Supabase Data API locked (RLS) | COMPLETE | live tests + schema report (RLS on all 15 tables) |
 | `anthropics/claude-code-security-review` | PARTIAL | workflow added and validated; runs on PRs only after the `CLAUDE_API_KEY` secret is set; not executed yet |
+| Cross-domain cookies and CORS (Vercel + Render) | COMPLETE | same-origin proxy via Vercel rewrites keeps `SameSite=Lax` first-party cookies; CORS allowlist; `SameSite=None` option refused without `Secure` (config tests); live check after deployment |
+| Banner storage on ephemeral hosting | PARTIAL | Supabase Storage driver implemented and unit-tested (6 tests); not yet run against the real bucket |
 | Strix security scan (TRD engineering aid) | MISSING | tool not available in this environment; run it against the deployed site or repository |
 
 ## 4. Architecture rules (CLAUDE.md)
@@ -76,24 +78,24 @@ Verification run for this audit: lint, Prettier, typecheck, build clean; backend
 
 | Requirement | Status | Evidence / reason |
 | --- | --- | --- |
-| Jest unit + integration with coverage | COMPLETE | 353 backend + 93 frontend tests; thresholds enforced |
+| Jest unit + integration with coverage | COMPLETE | 359 backend + 93 frontend tests; thresholds enforced; CI failure on PostgreSQL 17 (`23503` vs `23001`) fixed |
 | Database and Redis tests | COMPLETE | integration (real PostgreSQL), live suite, concurrency suite, Redis primitives unit tests |
 | Booking concurrency tests | COMPLETE | `npm run test:concurrency` 8/8 |
 | Payment, webhook, idempotency, refund tests | COMPLETE | payment/sslcommerz/cancellation suites + sandbox suite |
 | Notification and reminder tests | COMPLETE | 17 integration + 12 unit tests |
 | Playwright E2E (registration+OTP, login, discovery, seats, payment, confirmation, cancellation/refund, organizer login, venue/event management, booking overview) | COMPLETE | `e2e/*.spec.ts`, 6/6 passing |
 | CI on push/PR: lint, typecheck, build, tests, coverage, Playwright | NOT VERIFIED | `.github/workflows/ci.yml` written and YAML-validated; it has not run on GitHub yet (pushes are done by the owner) |
-| Automatic deployment on merge to `main` | PARTIAL | `deploy` job (Render deploy hook) + `render.yaml` + `Dockerfile`; needs the `RENDER_DEPLOY_HOOK_URL` secret and a Render service; Docker image not built locally (Docker not installed) |
-| Live frontend, backend and database | PARTIAL | database live on Supabase (migrations 0001–0008 applied); frontend/backend not yet hosted, which needs the owner's hosting account |
+| Automatic deployment on merge to `main` | PARTIAL | Docker-free: `render.yaml` (Render native Node, `autoDeployTrigger: checksPass`, migrations in the build) + `frontend/vercel.json` (Vercel Git deploys `main`); configured but not exercised until the owner creates the Render and Vercel projects |
+| Live frontend, backend and database | PARTIAL | database live on Supabase (migrations 0001–0008 applied); Render (API) and Vercel (web app) projects still to be created by the owner, step-by-step guide in README "Deployment" |
 | README, ARCHITECTURE, AI_USAGE, PRD, TRD, DATABASE_DESIGN, ALGORITHMS_AND_SECURITY | COMPLETE | all present and updated in Phase 6 |
 | DATABASE_DESIGN matches migrations and running schema | COMPLETE | `npm run db:schema-report -w backend` → "Schema consistent" |
 
 ## 6. Known limitations and remaining tasks
 
-1. **Hosting**: create the Render service (Blueprint), Supabase connection string, managed Redis and SMTP; set GitHub secrets `RENDER_DEPLOY_HOOK_URL` and `CLAUDE_API_KEY`; push to trigger CI. Then verify `GET /api/health/ready` on the live URL.
+1. **Hosting**: follow README "Deployment": Upstash Redis, Render web service from `render.yaml`, Vercel project with root `frontend` (check the API URL in `frontend/vercel.json`), then set `CORS_ORIGINS`/`FRONTEND_URL` to the Vercel URL. Add the GitHub secret `CLAUDE_API_KEY`. Verify `/api/health/ready` through the Vercel URL and that sign-in works (first-party cookie through the proxy).
 2. **SSLCommerz end to end**: on the hosted (public https) instance, pay one sandbox order with a test card, confirm the IPN arrives and the booking confirms, then cancel more than 24 h before the event and check the refund settles.
 3. **SMTP**: configure a real mail provider and confirm OTP, confirmation, cancellation and reminder emails arrive.
 4. **Strix**: run a Strix scan against the deployed instance and fix any findings.
-5. **Uploads on ephemeral hosts**: banners are stored on local disk; attach the persistent disk (in `render.yaml`) or add an object-storage `FileStorage` adapter (e.g. Supabase Storage) before scaling to several instances.
-6. **Rate limits / workers with several instances**: limits are shared via Redis and workers use `SKIP LOCKED`, so horizontal scaling is safe; uploads (point 5) are the only per-instance state.
+5. **Uploads on ephemeral hosts**: solved with `STORAGE_DRIVER=supabase` (private Supabase Storage bucket). The adapter is unit-tested against the Storage REST API contract but has not run against your project yet (needs `SUPABASE_SERVICE_ROLE_KEY` on Render).
+6. **Render free tier**: the API sleeps after 15 idle minutes (first request ~1 minute; workers pause and catch up on wake). Rate limits (Redis) and workers (`SKIP LOCKED`) are safe if you later scale to several instances.
 7. **Mock providers** are disabled by default in production (`ENABLE_MOCK_PAYMENTS=false`); enable them only for a demo deployment, with `MOCK_PAYMENT_WEBHOOK_SECRET` set.

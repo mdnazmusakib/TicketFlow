@@ -41,7 +41,7 @@ Seeded catalogue: 2 venues (Dhaka, Chattogram) and 4 events, 220 seats in total:
 | Frontend | React 19 · Vite 8 · TypeScript · React Router |
 | Payments | Mock Provider A/B, SSLCommerz (sandbox verified) |
 | Tests | Jest + Supertest (embedded PostgreSQL), Testing Library, Playwright |
-| CI/CD | GitHub Actions (quality, tests, coverage, Playwright, Claude Code security review, deploy hook) · Docker · Render |
+| CI/CD & hosting | GitHub Actions (quality, tests, coverage, Playwright, Claude Code security review) · Render (API, native Node) · Vercel (web app) · Supabase · managed Redis |
 
 Architecture, layers, patterns and data flows: [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -70,7 +70,7 @@ TicketFlow/
 ├── frontend/src/{app,components,features,lib,pages,styles,config} · frontend/tests
 ├── e2e/                     # Playwright journeys
 ├── .github/workflows/       # ci.yml, security-review.yml
-├── Dockerfile · render.yaml # single-host deployment
+├── render.yaml              # Render Blueprint (API) · frontend/vercel.json (web app)
 └── PRD.md · TRD.md · ARCHITECTURE.md · DATABASE_DESIGN.md · ALGORITHMS_AND_SECURITY.md · AI_USAGE.md · COMPLIANCE_MATRIX.md
 ```
 
@@ -118,7 +118,7 @@ Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(4
 | `JWT_EXPIRES_IN` | no (1h) | Session lifetime (cookie expires with the token) |
 | `AUTH_COOKIE_NAME` | no (tf_session) | httpOnly session cookie name |
 | `COOKIE_SECURE` | no (true in production) | Set `false` only for plain-http localhost; rejected in production |
-| `COOKIE_SAMESITE` | no (lax) | `lax` or `strict` |
+| `COOKIE_SAMESITE` | no (lax) | `lax`, `strict`, or `none` (only for a frontend on another site **without** the Vercel proxy; requires `COOKIE_SECURE=true`) |
 | `OTP_MAX_ATTEMPTS` | no (5) | Wrong codes allowed before the code is burned |
 | `OTP_RESEND_COOLDOWN_SECONDS` | no (60) | Minimum gap between OTP emails |
 | `AUTH_RATE_LIMIT_MAX` | no (30) | Requests per window per IP on `/api/auth/*` |
@@ -127,8 +127,11 @@ Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(4
 | `BOOKING_RATE_LIMIT_MAX` | no (60) | Hold/checkout/cancel requests per window per IP |
 | `FRONTEND_URL` | no (first CORS origin) | Web app URL used for payment return pages |
 | `PUBLIC_API_URL` | production: yes (https) | Public API URL: SSLCommerz IPN/returns and banner image URLs. Defaults to `http://localhost:PORT` outside production |
-| `UPLOAD_DIR` | no (`uploads`) | Directory for uploaded event banners (use a persistent disk in production) |
-| `FRONTEND_DIST_DIR` | no | Built web app served by the API (single-host deployment; set by the Docker image) |
+| `STORAGE_DRIVER` | no (local) | `local` (disk at `UPLOAD_DIR`) or `supabase` (Supabase Storage; use it on hosts with an ephemeral filesystem such as Render free) |
+| `UPLOAD_DIR` | no (`uploads`) | Banner directory for `STORAGE_DRIVER=local` |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | with `supabase` storage | Project URL and service-role key (server-side only; Supabase → Project Settings → API) |
+| `SUPABASE_STORAGE_BUCKET` | no (`event-banners`) | Private bucket, created automatically on the first upload |
+| `FRONTEND_DIST_DIR` | no | Optional: let the API also serve the built web app from one origin (used by the E2E stack; not needed with Vercel) |
 | `PAYMENT_HOLD_EXTENSION_SECONDS` | no (900) | Seats stay held this long once payment starts |
 | `REFUND_MAX_ATTEMPTS` | no (5) | Refund attempts before giving up |
 | `ENABLE_MOCK_PAYMENTS` | no (true outside production) | Mock Provider A and B |
@@ -156,7 +159,7 @@ The server validates every variable at startup and exits listing invalid variabl
 
 - Migrations live in `backend/db/migrations` (forward-only, numbered). The runner records each file with a SHA-256 checksum in `schema_migrations`, takes an advisory lock (safe with several instances) and refuses edited history.
   - Apply: `npm run db:migrate` · Status: `npm run db:migrate:status -w backend`
-  - In the Docker image: `node dist/db/cli/migrate.js` (Render runs it as the pre-deploy command).
+  - Production build: `npm run db:migrate:prod -w backend` (`node dist/db/cli/migrate.js`); Render runs it at the end of every build, before the new version starts.
 - Seed: `npm run db:seed` is idempotent (re-running re-anchors event dates to "now"). Refused in production unless `ALLOW_SEED=true`.
 - Consistency check: `npm run db:schema-report -w backend` compares the live database with a fresh database built from the migrations and with `DATABASE_DESIGN.md` (columns, constraints, indexes, triggers, functions, RLS).
 
@@ -264,19 +267,85 @@ The E2E stack (`npm run e2e:server -w backend`) starts an embedded PostgreSQL wi
 6. **Logout revocation**: sign out; the old cookie is denylisted in Redis until it would have expired.
 7. **Bypass mode** (automation only): `TEST_BYPASS_OTP=true` skips the OTP outside production; it is rejected when `NODE_ENV=production`.
 
-## Deployment
+## Deployment (free tier, no Docker)
 
-**Architecture (single host):** one Docker container runs the API and serves the built React app from the same origin (so the httpOnly `SameSite=Lax` session cookie works without third-party cookies), plus **Supabase PostgreSQL** and a managed **Redis** (Upstash / Redis Cloud, `rediss://`). The repository includes a `Dockerfile` and a Render Blueprint (`render.yaml`); any Docker host (Render, Railway, Fly.io, a VM) works the same way.
+### Recommended architecture
 
-1. **Database**: create a Supabase project; use the **session pooler** connection string (port 5432) as `DATABASE_URL`, `DATABASE_SSL=true` (optionally `DATABASE_SSL_CA_PATH` with the Supabase CA). Migrations run automatically before each deploy (`preDeployCommand`), or run `npm run db:migrate` once from your machine. Seed only if you want demo data (`ALLOW_SEED=true npm run db:seed`).
-2. **Redis**: create a Redis database and set `REDIS_URL` (TLS `rediss://`). It holds seat locks, OTPs, session revocations and rate-limit counters; no persistence is required, but use a dedicated database or `REDIS_KEY_PREFIX`.
-3. **Web service**: on Render choose *New → Blueprint* with this repository (or a Docker web service). Set the secrets marked `sync: false` in `render.yaml`: `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS` and `FRONTEND_URL` and `PUBLIC_API_URL` (all the service's https URL), SMTP settings, and SSLCommerz credentials. `JWT_SECRET` is generated. Keep `TRUST_PROXY=1`.
-4. **Uploads**: banners are stored on local disk; attach the persistent disk from `render.yaml` (mounted at `/app/backend/uploads`) or images are lost on redeploy.
-5. **SSLCommerz**: in the merchant panel the IPN URL is `https://<your-host>/api/payments/webhooks/SSLCOMMERZ`; set `SSLCOMMERZ_SANDBOX=false` only with live credentials.
-6. **CI/CD**: GitHub Actions runs on every push/PR. On `main`, after all checks pass, the `deploy` job calls the Render deploy hook stored in the repository secret `RENDER_DEPLOY_HOOK_URL` (`autoDeploy` is off in `render.yaml` so only tested commits deploy). The AI security review needs the secret `CLAUDE_API_KEY`.
-7. **Verify**: `GET /api/health/ready` returns `schemaVersion` and both dependencies `up`; sign in with a demo account (if seeded) and make a booking.
+| Part | Host | Why |
+| --- | --- | --- |
+| API (`backend`) | **Render** native Node web service (free) | builds from the repo, deploys `main` automatically **after the GitHub checks pass** (`autoDeployTrigger: checksPass`), health checks |
+| Web app (`frontend`) | **Vercel** (Hobby, free) | static Vite build, deploys `main` on every push, preview URLs for PRs, rewrites to the API |
+| Database | **Supabase PostgreSQL** (existing) | already migrated (0001–0008) |
+| Redis | **Upstash** (free) or Redis Cloud | seat locks, OTPs, session revocation, rate limits |
+| Banner images | **Supabase Storage** (`STORAGE_DRIVER=supabase`) | Render free has an ephemeral disk: local files vanish on restart, spin-down or redeploy |
 
-Secrets live only in the hosting dashboard / GitHub secrets and `backend/.env` locally; `.gitignore` and `.dockerignore` exclude every `.env*` file (except `.env.example`), and CI fails if one is committed.
+**Why the Vercel proxy matters.** `*.vercel.app` and `*.onrender.com` are different sites (both are on the Public Suffix List), so a cookie set by the API would be a *third-party* cookie in the browser, which Safari and privacy modes block, breaking sign-in. `frontend/vercel.json` therefore **rewrites `/api/*` and `/uploads/*` to the Render API**: the browser only talks to the Vercel domain, the httpOnly session cookie is first-party with `SameSite=Lax` + `Secure`, and the web app keeps its default API base URL `/api` (no `VITE_API_BASE_URL` needed). CORS still allowlists the Vercel origin because the proxy forwards the browser's `Origin` header.
+
+### Step 1: Redis (Upstash)
+Create a Redis database (region close to the Render region) and copy its **TLS** URL (`rediss://default:<password>@<host>:6379`).
+
+### Step 2: Supabase
+- **Database URL**: Project Settings → Database → Connection string → **Session pooler** (port 5432). Not the transaction pooler (6543).
+- **Storage**: Project Settings → API → copy the **Project URL** and the **service_role** key (server-side only). The private bucket `event-banners` is created automatically on the first upload.
+
+### Step 3: Backend on Render (native Node, no Docker)
+Either *New → Blueprint* and select this repository (uses `render.yaml`), or *New → Web Service* with:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | *(empty: repository root, it holds the workspaces lockfile)* |
+| Runtime / plan | Node · Free |
+| Branch | `main` |
+| Build command | `npm ci --include=dev --workspace backend && npm run build -w backend && npm run db:migrate:prod -w backend` |
+| Start command | `npm run start -w backend` |
+| Health check path | `/api/health/ready` |
+| Auto-deploy | **After CI checks pass** |
+
+Environment variables (keys only; enter values in the dashboard):
+
+| Key | Value |
+| --- | --- |
+| `NODE_VERSION` | `24` |
+| `NODE_ENV` | `production` |
+| `LOG_LEVEL` | `info` |
+| `TRUST_PROXY` | `2` (Vercel proxy + Render proxy, so rate limits see the real client IP) |
+| `DATABASE_URL`, `DATABASE_SSL` | Supabase session pooler URL, `true` |
+| `REDIS_URL` | Upstash `rediss://` URL |
+| `JWT_SECRET` | generated (≥ 32 random characters) |
+| `CORS_ORIGINS` | `https://<your-app>.vercel.app` (comma-separate extra domains) |
+| `FRONTEND_URL` | `https://<your-app>.vercel.app` |
+| `PUBLIC_API_URL` | `https://<your-api>.onrender.com` (https is required in production) |
+| `EMAIL_TRANSPORT`, `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | `smtp` + your mail provider (e.g. Brevo / Resend SMTP) |
+| `STORAGE_DRIVER`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `supabase` + Step 2 values |
+| `ENABLE_MOCK_PAYMENTS`, `MOCK_PAYMENT_WEBHOOK_SECRET` | `true` + generated secret for a demo; `false` for a real launch |
+| `SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWORD`, `SSLCOMMERZ_SANDBOX`, `SSLCOMMERZ_CUSTOMER_PHONE` | sandbox store, `true`, a phone number |
+
+Migrations run at the end of each build (forward-only, checksummed, advisory-locked), so a failed migration fails the deploy and the old version keeps serving. The demo data is already in your Supabase; to re-seed from your machine run `npm run db:seed` (with `ALLOW_SEED=true` if `NODE_ENV=production`).
+
+### Step 4: Frontend on Vercel
+1. In `frontend/vercel.json`, make sure both rewrite destinations use your Render URL (default: `https://ticketflow-api.onrender.com`; change it if Render gave the service another name).
+2. *Add New → Project* → import the repository → **Root Directory: `frontend`**. Framework, install, build and output settings come from `vercel.json`:
+   - Install: `cd .. && npm ci --include=dev --workspace frontend` (installs from the root lockfile)
+   - Build: `npm run build` · Output: `dist`
+   - Production branch: `main` (Vercel deploys every push; PRs get preview URLs)
+3. No environment variables are needed (`VITE_API_BASE_URL` defaults to `/api`, served through the rewrite).
+4. Put the final Vercel URL into Render's `CORS_ORIGINS` and `FRONTEND_URL` and redeploy the API.
+
+### Step 5: SSLCommerz URLs after deployment
+- The API sends `success_url`, `fail_url`, `cancel_url` and `ipn_url` with every payment session, all built from `PUBLIC_API_URL`:
+  - Return: `https://<your-api>.onrender.com/api/payments/providers/sslcommerz/return/{success|fail|cancel}` (validated server-side, then redirected to `FRONTEND_URL/payments/<id>/result`)
+  - IPN: `https://<your-api>.onrender.com/api/payments/webhooks/SSLCOMMERZ`
+- Also enter the IPN URL in the SSLCommerz merchant panel (*My Stores → IPN settings*). Then pay one sandbox order and cancel it more than 24 hours before the event to check the refund.
+
+### Step 6: CI/CD and checks
+- Every push/PR runs `.github/workflows/ci.yml` (lint, format, typecheck, builds, backend tests + coverage, concurrency on PostgreSQL + Redis, frontend tests, Playwright). Render deploys `main` only when these checks pass; Vercel deploys `main` on push.
+- Add the repository secret `CLAUDE_API_KEY` to enable the AI security review on PRs.
+- Verify: `https://<your-app>.vercel.app/api/health/ready` shows `schemaVersion: "0008"` and both dependencies `up`; sign in with a demo account and make a booking.
+
+### Free-tier notes
+- Render free instances sleep after 15 minutes without traffic; the first request then takes about a minute (the Vercel proxy may time out once; reload). The booking expiry and reminder workers also pause while asleep and catch up on wake-up: expired holds are also released lazily when touched, and reminders are only sent while at least 1 hour remains.
+- One free instance only; workers and rate limits are already safe for more instances (`SKIP LOCKED`, Redis counters).
+- Vercel preview URLs are not in `CORS_ORIGINS`; add one if you want to test a preview against the production API.
 
 ## Security
 

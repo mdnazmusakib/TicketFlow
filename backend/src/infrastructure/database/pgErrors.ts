@@ -28,7 +28,9 @@ export function mapPgError(error: unknown): AppError | undefined {
       return new ConflictError(`Duplicate value violates ${constraint}`, 'CONFLICT', {
         cause: error,
       });
+    // foreign_key_violation; PostgreSQL 18 reports ON DELETE/UPDATE RESTRICT as restrict_violation.
     case '23503':
+    case '23001':
       return new ConflictError(`Referenced record constraint ${constraint} failed`, 'CONFLICT', {
         cause: error,
       });

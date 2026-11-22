@@ -20,6 +20,11 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(config);
+  if (config.isProduction && config.uploads.driver === 'local') {
+    logger.warn(
+      'STORAGE_DRIVER=local: uploaded banners are lost on hosts with an ephemeral filesystem (use supabase or a persistent disk)',
+    );
+  }
   const container = buildContainer(config, logger);
 
   try {

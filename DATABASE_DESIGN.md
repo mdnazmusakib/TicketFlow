@@ -462,7 +462,7 @@ All functions pin `search_path = public, pg_temp`.
 | events, venues, bookings → users | RESTRICT | Users with history are deactivated (`is_active`), not deleted |
 | events → venues | RESTRICT | Venue in use cannot disappear |
 | seat_categories, seats → events | CASCADE | A draft event with no bookings can be deleted cleanly |
-| bookings → events | RESTRICT | Events with bookings are cancelled, not deleted |
+| bookings → events | RESTRICT | Events with bookings are cancelled, not deleted (PostgreSQL 17 reports the violation as SQLSTATE `23503`, PostgreSQL 18 as `23001`; the API maps both to 409) |
 | booking_seats, payments, refunds, tickets, history → bookings | RESTRICT | Financial/audit history is permanent |
 | notifications → users | CASCADE | Inbox belongs to the user |
 | notifications → bookings | SET NULL | Keep the message if the booking reference goes |

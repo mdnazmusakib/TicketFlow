@@ -14,6 +14,7 @@ import { HealthController } from './controllers/HealthController';
 import { UploadController } from './controllers/UploadController';
 import type { FileStorage } from './domain/uploads/FileStorage';
 import { LocalFileStorage } from './infrastructure/storage/LocalFileStorage';
+import { SupabaseFileStorage } from './infrastructure/storage/SupabaseFileStorage';
 import { RedisRateLimitStore } from './infrastructure/redis/RedisRateLimitStore';
 import type { Store } from 'express-rate-limit';
 import { EventBannerService } from './services/events/EventBannerService';
@@ -201,7 +202,10 @@ export function buildContainer(
   const bannerService = new EventBannerService(
     db,
     events,
-    overrides.fileStorage ?? new LocalFileStorage(config.uploads.dir),
+    overrides.fileStorage ??
+      (config.uploads.driver === 'supabase'
+        ? new SupabaseFileStorage(config.uploads)
+        : new LocalFileStorage(config.uploads.dir)),
     config.urls.publicApi,
     logger,
   );

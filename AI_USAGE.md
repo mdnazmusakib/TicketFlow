@@ -11,7 +11,7 @@ TicketFlow was built in six phases with **Claude Code** (Anthropic) working as a
 | 3 | Pricing, holds, ticket limit, concurrency | implemented strategies, locks, lifecycle, concurrency suite | reviewed |
 | 4 | Payments, cancellation, refunds, SSLCommerz | implemented adapters, idempotency, webhooks, refunds | provided SSLCommerz sandbox credentials |
 | 5 | Notifications, reminders, dashboards | outbox, reminder worker, inbox, dashboards | reviewed |
-| 6 | Testing, security audit, CI/CD, deployment, docs | E2E suite, upload security, CI workflows, Docker/Render, audit, docs | reviews and commits all changes, configures hosting and secrets |
+| 6 | Testing, security audit, CI/CD, deployment, docs | E2E suite, upload security, CI workflows, Render/Vercel deployment, audit, docs | reviews and commits all changes, chose a Docker-free free-tier setup, configures hosting and secrets |
 
 Engineering aids named in the TRD: Context7-style documentation lookup (library APIs were checked against official docs, e.g. the SSLCommerz v4 Refund API spec was fetched and the adapter fixed to send the mandatory `refund_trans_id`), sequential reasoning for edge cases (late captures, lease expiry, reminder windows), concise "caveman" communication, and `anthropics/claude-code-security-review` in CI. Strix was not run (see the compliance matrix).
 
@@ -29,6 +29,8 @@ Examples kept as lessons (all fixed and covered by tests):
 - The SSLCommerz refund request lacked the mandatory `refund_trans_id` (new in the 2025 API); found by checking the official spec.
 - A documentation edit using `String.replace` with a `$` + backtick sequence duplicated half of `DATABASE_DESIGN.md`; detected later and repaired, and edits now use replacer functions.
 - Shell heredocs occasionally dropped backslashes in regular expressions; files are now written with editor tools instead.
+- A schema test expected SQLSTATE `23001` for an `ON DELETE RESTRICT` violation: true on PostgreSQL 18 (local embedded server) but CI and Supabase run PostgreSQL 17, which reports `23503`. The test now accepts both and checks the row survives, and the error mapper handles both codes.
+- The first deployment proposal used Docker; at the owner's request it was replaced by a Render native Node service + Vercel, which also exposed the cross-site cookie and ephemeral-disk issues that were then fixed (Vercel proxy, Supabase Storage driver).
 - PostgreSQL parameter type inference (`inconsistent types deduced for parameter`) required explicit casts in several queries.
 
 ## 4. Responsibility

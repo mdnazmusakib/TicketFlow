@@ -149,6 +149,7 @@ describe('mapPgError', () => {
       ConflictError,
     );
     expect(mapPgError(withConstraint('23503', 'fk'))).toBeInstanceOf(ConflictError);
+    expect(mapPgError(withConstraint('23001', 'fk'))).toBeInstanceOf(ConflictError);
     expect(mapPgError(withConstraint('23P01'))).toBeInstanceOf(ConflictError);
     expect(mapPgError(withConstraint('23514', 'chk_bookings_amounts'))).toBeInstanceOf(
       ValidationError,

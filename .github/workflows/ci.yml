@@ -148,24 +148,3 @@ jobs:
             playwright-report
             test-results
           retention-days: 7
-
-  deploy:
-    name: Deploy (main only)
-    # Continuous deployment after every check passes on main. Render rebuilds the Docker image
-    # (API + web app) and runs migrations as its pre-deploy step (see render.yaml).
-    # Requires the repository secret RENDER_DEPLOY_HOOK_URL; skipped when it is not set.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [quality, backend-tests, concurrency-tests, frontend-tests, e2e]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    steps:
-      - name: Trigger Render deploy
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "::notice::RENDER_DEPLOY_HOOK_URL not set; skipping deployment."; exit 0
-          fi
-          curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
-          echo "Deployment triggered."

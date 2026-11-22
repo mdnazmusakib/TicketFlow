@@ -65,7 +65,8 @@ const envSchema = z
       .default('tf_session'),
     /** Defaults to true in production. Can only be disabled outside production (plain-http localhost). */
     COOKIE_SECURE: booleanString.optional(),
-    COOKIE_SAMESITE: z.enum(['lax', 'strict']).default('lax'),
+    /** 'none' only for a frontend on another site without a same-origin proxy (needs Secure). */
+    COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
     OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
     OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(30),
@@ -105,6 +106,14 @@ const envSchema = z
     PUBLIC_API_URL: urlWithProtocols(['http:', 'https:']).optional(),
     /** Directory for uploaded event banners (local disk storage). */
     UPLOAD_DIR: z.string().trim().min(1).max(500).default('uploads'),
+    /** 'local' disk (dev, persistent disks) or 'supabase' Storage (ephemeral hosts such as Render free). */
+    STORAGE_DRIVER: z.enum(['local', 'supabase']).default('local'),
+    SUPABASE_URL: urlWithProtocols(['https:', 'http:']).optional(),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
+    SUPABASE_STORAGE_BUCKET: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/)
+      .default('event-banners'),
     /** Built web app to serve from this server (single-host deployment); unset = API only. */
     FRONTEND_DIST_DIR: z.string().trim().min(1).max(500).optional(),
     PAYMENT_HOLD_EXTENSION_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
@@ -132,6 +141,24 @@ const envSchema = z
         code: 'custom',
         path: ['SMTP_HOST'],
         message: 'is required when EMAIL_TRANSPORT=smtp',
+      });
+    }
+    if (env.COOKIE_SAMESITE === 'none' && !(env.COOKIE_SECURE ?? env.NODE_ENV === 'production')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['COOKIE_SAMESITE'],
+        message: 'none requires COOKIE_SECURE=true (browsers reject SameSite=None without Secure)',
+      });
+    }
+    if (
+      env.STORAGE_DRIVER === 'supabase' &&
+      (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SUPABASE_SERVICE_ROLE_KEY'],
+        message:
+          'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when STORAGE_DRIVER=supabase',
       });
     }
     if (env.NODE_ENV !== 'production') return;
@@ -234,7 +261,7 @@ export interface AppConfig {
     cookie: {
       name: string;
       secure: boolean;
-      sameSite: 'lax' | 'strict';
+      sameSite: 'lax' | 'strict' | 'none';
     };
   };
   email: {
@@ -255,7 +282,9 @@ export interface AppConfig {
   };
   allowSeed: boolean;
   urls: { frontend: string; publicApi: string };
-  uploads: { dir: string };
+  uploads:
+    | { driver: 'local'; dir: string }
+    | { driver: 'supabase'; url: string; serviceRoleKey: string; bucket: string };
   frontendDistDir: string | undefined;
   notifications: { reminderWindowMinutes: number; maxAttempts: number; workerIntervalMs: number };
   payments: {
@@ -373,7 +402,15 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       frontend: (env.FRONTEND_URL ?? env.CORS_ORIGINS[0]!).replace(/\/$/, ''),
       publicApi: (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`).replace(/\/$/, ''),
     },
-    uploads: { dir: env.UPLOAD_DIR },
+    uploads:
+      env.STORAGE_DRIVER === 'supabase'
+        ? {
+            driver: 'supabase' as const,
+            url: env.SUPABASE_URL!,
+            serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY!,
+            bucket: env.SUPABASE_STORAGE_BUCKET,
+          }
+        : { driver: 'local' as const, dir: env.UPLOAD_DIR },
     frontendDistDir: env.FRONTEND_DIST_DIR,
     payments: {
       holdExtensionSeconds: env.PAYMENT_HOLD_EXTENSION_SECONDS,

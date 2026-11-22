@@ -178,8 +178,15 @@ describe('schema integrity (real PostgreSQL)', () => {
       const failure = await pgFailure(
         testDb.pool.query('DELETE FROM events WHERE id = $1', [fx.eventId]),
       );
-      // ON DELETE RESTRICT => restrict_violation
-      expect(failure.code).toBe('23001');
+      // ON DELETE RESTRICT blocks the delete. PostgreSQL 17 (Supabase, CI) reports it as
+      // foreign_key_violation (23503); PostgreSQL 18 (embedded locally) as restrict_violation (23001).
+      expect(['23503', '23001']).toContain(failure.code);
+      expect(failure.constraint).toMatch(/event/);
+      const { rows } = await testDb.pool.query(
+        'SELECT count(*)::int AS n FROM events WHERE id = $1',
+        [fx.eventId],
+      );
+      expect(rows[0].n).toBe(1);
     });
   });
 
