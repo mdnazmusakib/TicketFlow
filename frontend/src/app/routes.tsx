@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router';
 import { RouteError } from '../components/feedback/RouteError';
 import { AppLayout } from '../components/layout/AppLayout';
 import { AccountPage } from '../features/account/AccountPage';
+import { AdminPage } from '../features/admin/AdminPage';
 import { BookingDetailPage } from '../features/bookings/BookingDetailPage';
 import { MyBookingsPage } from '../features/bookings/MyBookingsPage';
 import { MockCheckoutPage } from '../features/payments/MockCheckoutPage';
@@ -12,6 +13,8 @@ import { RegisterPage } from '../features/auth/RegisterPage';
 import { VerifyOtpPage } from '../features/auth/VerifyOtpPage';
 import { EventDetailPage } from '../features/events/EventDetailPage';
 import { EventsPage } from '../features/events/EventsPage';
+import { NotificationsPage } from '../features/notifications/NotificationsPage';
+import { EventBookingsPage } from '../features/organizer/EventBookingsPage';
 import { EventFormPage } from '../features/organizer/EventFormPage';
 import { OrganizerEventsPage } from '../features/organizer/OrganizerEventsPage';
 import { SeatMapPage } from '../features/organizer/SeatMapPage';
@@ -36,6 +39,7 @@ export const routes: RouteObject[] = [
         element: <ProtectedRoute />,
         children: [
           { path: 'account', element: <AccountPage /> },
+          { path: 'notifications', element: <NotificationsPage /> },
           { path: 'bookings', element: <MyBookingsPage /> },
           { path: 'bookings/:id', element: <BookingDetailPage /> },
           { path: 'payments/mock-checkout', element: <MockCheckoutPage /> },
@@ -51,7 +55,13 @@ export const routes: RouteObject[] = [
           { path: 'events/new', element: <EventFormPage /> },
           { path: 'events/:id/edit', element: <EventFormPage /> },
           { path: 'events/:id/seats', element: <SeatMapPage /> },
+          { path: 'events/:id/bookings', element: <EventBookingsPage /> },
         ],
+      },
+      {
+        path: 'admin',
+        element: <ProtectedRoute roles={['ADMIN']} />,
+        children: [{ index: true, element: <AdminPage /> }],
       },
       { path: '*', element: <NotFoundPage /> },
     ],

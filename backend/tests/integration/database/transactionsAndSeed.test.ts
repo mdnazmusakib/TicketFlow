@@ -79,7 +79,7 @@ describe('Database transactions (real PostgreSQL)', () => {
 
   it('health probe reports connectivity and the applied schema version', async () => {
     await expect(new PostgresHealthProbe(testDb.db).check()).resolves.toEqual({
-      schemaVersion: '0007',
+      schemaVersion: '0008',
     });
     await expect(testDb.db.ping()).resolves.toBeUndefined();
   });

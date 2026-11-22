@@ -25,6 +25,7 @@ export class FakeSslCommerz {
   readonly sessions = new Map<string, Session>();
   readonly calls: string[] = [];
   refundCalls = 0;
+  readonly refundTransIds: string[] = [];
   failValidation = false;
 
   readonly fetch: typeof fetch = async (input, init) => {
@@ -69,6 +70,25 @@ export class FakeSslCommerz {
 
     if (url.pathname === '/validator/api/merchantTransIDvalidationAPI.php') {
       if (url.searchParams.get('refund_amount')) {
+        const transId = url.searchParams.get('refund_trans_id') ?? '';
+        // Mandatory fields of the Initiate Refund API.
+        if (
+          !url.searchParams.get('bank_tran_id') ||
+          !/^[A-Za-z0-9_-]{1,30}$/.test(transId) ||
+          !url.searchParams.get('refund_remarks')
+        ) {
+          return json({
+            APIConnect: 'INVALID_REQUEST',
+            errorReason: 'Missing mandatory refund fields',
+          });
+        }
+        if (!/^\d+\.\d{2}$/.test(url.searchParams.get('refund_amount') ?? '')) {
+          return json({
+            APIConnect: 'INVALID_REQUEST',
+            errorReason: 'refund_amount must be decimal(10,2)',
+          });
+        }
+        this.refundTransIds.push(transId);
         this.refundCalls += 1;
         return json({
           APIConnect: 'DONE',

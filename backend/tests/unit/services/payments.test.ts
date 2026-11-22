@@ -18,6 +18,7 @@ import { MockProviderA, MockProviderB } from '../../../src/infrastructure/paymen
 import {
   SslCommerzAdapter,
   fromDecimalAmount,
+  refundTransactionId,
   toDecimalAmount,
   verifySslCommerzSignature,
 } from '../../../src/infrastructure/payments/SslCommerzAdapter';
@@ -370,6 +371,40 @@ describe('Mock providers', () => {
 });
 
 describe('SSLCommerz adapter', () => {
+  it('keeps sandbox "PROCESSING" (unpaid session) open instead of failing it', async () => {
+    const adapter = new SslCommerzAdapter(
+      {
+        ...SSL_STORE,
+        sandbox: true,
+        publicApiUrl: 'http://localhost:4000',
+        defaultCustomerPhone: '01700000000',
+      },
+      async () =>
+        new Response(
+          JSON.stringify({
+            APIConnect: 'DONE',
+            element: [{ status: 'PROCESSING', tran_id: 'TFproc123' }],
+          }),
+          {
+            status: 200,
+          },
+        ),
+    );
+    expect(
+      await adapter.verifyPayment({ transactionRef: 'TFproc123', amountMinor: 1, currency: 'BDT' }),
+    ).toMatchObject({
+      status: 'PENDING',
+    });
+  });
+
+  it('derives a stable refund_trans_id of at most 30 characters', () => {
+    const id = refundTransactionId('refund_TF0123456789abcdef01234567_1');
+    expect(id).toMatch(/^RT[0-9a-f]{28}$/);
+    expect(id).toHaveLength(30);
+    expect(refundTransactionId('refund_TF0123456789abcdef01234567_1')).toBe(id);
+    expect(refundTransactionId('refund_TF0123456789abcdef01234567_2')).not.toBe(id);
+  });
+
   it('converts amounts and verifies IPN signatures as documented', () => {
     expect(toDecimalAmount(150050)).toBe('1500.50');
     expect(fromDecimalAmount('1500.50')).toBe(150050);

@@ -9,6 +9,7 @@ import {
   PublicEventController,
   VenueController,
 } from './controllers/EventController';
+import { DashboardController, NotificationController } from './controllers/DashboardController';
 import { HealthController } from './controllers/HealthController';
 import { PaymentController } from './controllers/PaymentController';
 import type { EmailSender } from './domain/notifications/email';
@@ -29,7 +30,9 @@ import { createAuthenticate } from './middlewares/auth';
 import { BookingRepository } from './repositories/BookingRepository';
 import { EventRepository } from './repositories/EventRepository';
 import { PostgresHealthProbe, RedisHealthProbe } from './repositories/HealthProbes';
+import { DashboardRepository } from './repositories/DashboardRepository';
 import { IdempotencyRepository } from './repositories/IdempotencyRepository';
+import { NotificationRepository } from './repositories/NotificationRepository';
 import { PaymentRepository } from './repositories/PaymentRepository';
 import { SeatMapRepository } from './repositories/SeatMapRepository';
 import { UserRepository } from './repositories/UserRepository';
@@ -44,7 +47,12 @@ import { SeatLockCoordinator } from './services/booking/SeatLockCoordinator';
 import { EventDiscoveryService } from './services/events/EventDiscoveryService';
 import { EventService } from './services/events/EventService';
 import { VenueService } from './services/events/VenueService';
+import { DashboardService } from './services/dashboard/DashboardService';
 import { HealthService } from './services/HealthService';
+import { EmailChannel, InAppChannel } from './services/notifications/channels';
+import { NotificationDispatcher } from './services/notifications/NotificationDispatcher';
+import { NotificationInboxService } from './services/notifications/NotificationInboxService';
+import { ReminderService } from './services/notifications/ReminderService';
 import { CancellationService } from './services/payments/CancellationService';
 import { IdempotencyService } from './services/payments/IdempotencyService';
 import { MockCheckoutService } from './services/payments/MockCheckoutService';
@@ -53,6 +61,7 @@ import { RefundService, toRefundDto } from './services/payments/RefundService';
 import { WebhookService } from './services/payments/WebhookService';
 import { APP_VERSION } from './version';
 import { BookingExpiryWorker } from './workers/BookingExpiryWorker';
+import { IntervalWorker } from './workers/IntervalWorker';
 
 export interface Controllers {
   health: HealthController;
@@ -62,6 +71,8 @@ export interface Controllers {
   publicEvents: PublicEventController;
   bookings: BookingController;
   payments: PaymentController;
+  notifications: NotificationController;
+  dashboards: DashboardController;
 }
 
 export interface Infrastructure {
@@ -82,9 +93,13 @@ export interface Container {
     refunds: RefundService;
     cancellations: CancellationService;
     webhooks: WebhookService;
+    notifications: NotificationDispatcher;
+    reminders: ReminderService;
   };
   gateways: PaymentGatewayRegistry;
   expiryWorker: BookingExpiryWorker;
+  /** Reminder scheduling + notification outbox delivery. */
+  notificationWorker: IntervalWorker;
   /** Connects to Redis and verifies PostgreSQL. Fails fast on startup. */
   start(): Promise<void>;
   /** Closes every connection; safe to call more than once. */
@@ -101,6 +116,8 @@ export interface ContainerOverrides {
   now?: () => Date;
   /** Replaces/extends the configured payment gateways (e.g. SSLCommerz with a fake HTTP client). */
   paymentGateways?: PaymentGateway[];
+  /** Deliver notifications right after commit (default true). Tests disable it for determinism. */
+  notificationImmediateDelivery?: boolean;
 }
 
 function createEmailSender(config: AppConfig): EmailSender {
@@ -125,6 +142,8 @@ export function buildContainer(
     lockManager: new RedisLockManager(redis),
     ttlStore,
   };
+
+  const emailSender = overrides.emailSender ?? createEmailSender(config);
 
   // Repositories
   const users = new UserRepository(db);
@@ -156,7 +175,7 @@ export function buildContainer(
     new BcryptPasswordHasher(config.auth.bcryptSaltRounds),
     otpService,
     tokenService,
-    overrides.emailSender ?? createEmailSender(config),
+    emailSender,
     {
       otpBypass: config.isProduction ? false : (overrides.otpBypass ?? config.auth.otpBypass),
       otpTtlSeconds: config.auth.otpTtlSeconds,
@@ -201,6 +220,31 @@ export function buildContainer(
   // Booking
   const bookingRepository = new BookingRepository(db);
   const lifecycle = new BookingLifecycle(bookingRepository);
+
+  // Notifications: transactional outbox fed by booking lifecycle events (Observer).
+  const notificationRepository = new NotificationRepository(db);
+  const dispatcher = new NotificationDispatcher(
+    notificationRepository,
+    [new EmailChannel(emailSender), new InAppChannel()],
+    {
+      maxAttempts: config.notifications.maxAttempts,
+      logger,
+      immediateDelivery: overrides.notificationImmediateDelivery ?? true,
+      ...(overrides.now ? { now: overrides.now } : {}),
+    },
+  );
+  lifecycle.onTransition(dispatcher.onBookingTransition);
+  const reminders = new ReminderService(db, dispatcher, {
+    windowMinutes: config.notifications.reminderWindowMinutes,
+    logger,
+  });
+  const notificationWorker = new IntervalWorker(
+    async () => {
+      await reminders.scheduleDue();
+      await dispatcher.deliverDue();
+    },
+    { intervalMs: config.notifications.workerIntervalMs, name: 'notifications', logger },
+  );
   const seatLocks = new SeatLockCoordinator(infrastructure.lockManager, ttlStore, {
     acquireTtlMs: 15_000,
     logger,
@@ -292,6 +336,12 @@ export function buildContainer(
     infrastructure,
     authenticate: createAuthenticate(authService, config.auth.cookie.name),
     controllers: {
+      notifications: new NotificationController(
+        new NotificationInboxService(notificationRepository),
+      ),
+      dashboards: new DashboardController(
+        new DashboardService(new DashboardRepository(db), users, events, notificationRepository),
+      ),
       health: new HealthController(healthService),
       auth: new AuthController(authService, config.auth.cookie),
       venues: new VenueController(venueService),
@@ -312,9 +362,12 @@ export function buildContainer(
       refunds: refundService,
       cancellations: cancellationService,
       webhooks: webhookService,
+      notifications: dispatcher,
+      reminders,
     },
     gateways,
     expiryWorker,
+    notificationWorker,
     async start() {
       if (redis.status === 'wait') await redis.connect();
       await db.ping();
@@ -323,6 +376,8 @@ export function buildContainer(
       if (closed) return;
       closed = true;
       await expiryWorker.stop();
+      await notificationWorker.stop();
+      dispatcher.stop();
       await Promise.allSettled([db.close(), redis.quit()]);
     },
   };

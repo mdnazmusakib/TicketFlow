@@ -9,6 +9,8 @@ import { formatDateTime } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import { organizerApi as defaultApi, type OrganizerApi } from '../events/eventsApi';
 import type { ManagedEvent } from '../events/types';
+import type { DashboardApi } from '../dashboard/dashboardApi';
+import { OrganizerOverview } from './OrganizerOverview';
 
 const DONE = {
   publish: 'published',
@@ -17,7 +19,13 @@ const DONE = {
   delete: 'deleted',
 } as const;
 
-export function OrganizerEventsPage({ api = defaultApi }: { api?: OrganizerApi }) {
+export function OrganizerEventsPage({
+  api = defaultApi,
+  dashboard,
+}: {
+  api?: OrganizerApi;
+  dashboard?: DashboardApi;
+}) {
   const [page, setPage] = useState(1);
   const events = useAsync(
     useCallback(
@@ -49,7 +57,7 @@ export function OrganizerEventsPage({ api = defaultApi }: { api?: OrganizerApi }
   return (
     <section>
       <div className="page-header">
-        <h1>My events</h1>
+        <h1>Organizer dashboard</h1>
         <div className="list__actions">
           <Link className="btn btn--secondary" to="/organizer/venues">
             Venues
@@ -59,6 +67,8 @@ export function OrganizerEventsPage({ api = defaultApi }: { api?: OrganizerApi }
           </Link>
         </div>
       </div>
+      <OrganizerOverview {...(dashboard ? { api: dashboard } : {})} />
+      <h2>My events</h2>
       <FormAlert message={message?.text} tone={message?.tone} />
       {events.status === 'loading' && <Spinner label="Loading your events" />}
       {events.status === 'error' && (
@@ -98,6 +108,12 @@ export function OrganizerEventsPage({ api = defaultApi }: { api?: OrganizerApi }
                       </Link>
                     </>
                   )}
+                  <Link
+                    className="btn btn--secondary"
+                    to={`/organizer/events/${event.id}/bookings`}
+                  >
+                    Bookings
+                  </Link>
                   {event.status === 'DRAFT' && (
                     <Button onClick={() => run(event, 'publish')}>Publish</Button>
                   )}

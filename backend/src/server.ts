@@ -40,6 +40,7 @@ async function main(): Promise<void> {
     logger.info({ port: config.port, env: config.nodeEnv }, 'TicketFlow API listening');
   });
   container.expiryWorker.start();
+  container.notificationWorker.start();
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
 

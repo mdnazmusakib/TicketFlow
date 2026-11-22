@@ -94,6 +94,11 @@ const envSchema = z
 
     ALLOW_SEED: booleanString.default(false),
 
+    /** Reminders are scheduled when the event starts within this many minutes (never with < 60 left). */
+    REMINDER_WINDOW_MINUTES: z.coerce.number().int().min(61).max(10080).default(120),
+    NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
+    NOTIFICATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(1000).max(600000).default(15000),
+
     /** Browser-facing URL of the web app (payment return pages). Defaults to the first CORS origin. */
     FRONTEND_URL: urlWithProtocols(['http:', 'https:']).optional(),
     /** Public URL of this API, used by providers for IPN/return callbacks. */
@@ -232,6 +237,7 @@ export interface AppConfig {
   };
   allowSeed: boolean;
   urls: { frontend: string; publicApi: string };
+  notifications: { reminderWindowMinutes: number; maxAttempts: number; workerIntervalMs: number };
   payments: {
     holdExtensionSeconds: number;
     refundMaxAttempts: number;
@@ -338,6 +344,11 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       max: env.RATE_LIMIT_MAX,
     },
     allowSeed: env.ALLOW_SEED,
+    notifications: {
+      reminderWindowMinutes: env.REMINDER_WINDOW_MINUTES,
+      maxAttempts: env.NOTIFICATION_MAX_ATTEMPTS,
+      workerIntervalMs: env.NOTIFICATION_WORKER_INTERVAL_MS,
+    },
     urls: {
       frontend: (env.FRONTEND_URL ?? env.CORS_ORIGINS[0]!).replace(/\/$/, ''),
       publicApi: (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`).replace(/\/$/, ''),

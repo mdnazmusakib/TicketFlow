@@ -74,6 +74,7 @@ export async function createApiHarness(
     redis,
     emailSender: emails,
     otpBypass: options.otpBypass ?? false,
+    notificationImmediateDelivery: false,
     ...(options.now ? { now: options.now } : {}),
     ...(options.paymentGateways ? { paymentGateways: options.paymentGateways } : {}),
   });
@@ -94,6 +95,7 @@ export async function createApiHarness(
     realRedis,
     async close() {
       await container.expiryWorker.stop();
+      await container.notificationWorker.stop();
       if (realRedis) {
         // Remove every key this harness created on the shared server.
         await new RedisTtlStore(redis, config.redis.keyPrefix)

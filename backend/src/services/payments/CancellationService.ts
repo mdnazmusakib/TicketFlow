@@ -129,6 +129,7 @@ export class CancellationService {
           ? 'cancelled by customer (full refund)'
           : 'cancelled by customer (no refund)',
         actorId: actor.id,
+        details: { refundable: decision.refundable, refundAmountMinor: decision.refundAmountMinor },
         cancellationReason:
           reason ??
           (decision.refundable

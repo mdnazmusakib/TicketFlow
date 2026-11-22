@@ -4,6 +4,8 @@ export interface EmailMessage {
   subject: string;
   text: string;
   html?: string;
+  /** Stable id for this logical message; providers can use it to drop duplicates on retries. */
+  idempotencyKey?: string;
 }
 
 /** Email delivery abstraction (DIP): services never depend on a concrete mailer. */

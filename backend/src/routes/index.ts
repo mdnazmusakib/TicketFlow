@@ -2,6 +2,11 @@ import { Router, type RequestHandler } from 'express';
 import type { Controllers } from '../container';
 import { createAuthRouter } from './auth.routes';
 import { createBookingRouter } from './booking.routes';
+import {
+  createAdminRouter,
+  createDashboardRouter,
+  createNotificationRouter,
+} from './dashboard.routes';
 import { createOrganizerRouter, createPublicEventRouter } from './event.routes';
 import { createHealthRouter } from './health.routes';
 import { createPaymentRouter, createProviderCallbackRouter } from './payment.routes';
@@ -26,5 +31,11 @@ export function createApiRouter(controllers: Controllers, guards: RouteGuards): 
     '/organizer',
     createOrganizerRouter(controllers.venues, controllers.organizerEvents, guards.authenticate),
   );
+  router.use(
+    '/notifications',
+    createNotificationRouter(controllers.notifications, guards.authenticate),
+  );
+  router.use('/dashboard', createDashboardRouter(controllers.dashboards, guards.authenticate));
+  router.use('/admin', createAdminRouter(controllers.dashboards, guards.authenticate));
   return router;
 }

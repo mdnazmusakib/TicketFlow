@@ -10,6 +10,7 @@ import { EventFormPage } from '../src/features/organizer/EventFormPage';
 import { SeatMapPage } from '../src/features/organizer/SeatMapPage';
 import { VenuesPage } from '../src/features/organizer/VenuesPage';
 import { ApiError } from '../src/lib/apiClient';
+import { fakeDashboardApi } from './dashboardFixtures';
 import { customerUser, fakeAuthApi, organizerUser, renderRoute } from './testUtils';
 
 const venue: Venue = {
@@ -278,7 +279,10 @@ describe('SeatMapPage', () => {
 
 describe('Auth context, account page and header', () => {
   it('shows the profile of the signed-in user', async () => {
-    renderRoute(<AccountPage />, { path: '/account', auth: fakeAuthApi(customerUser) });
+    renderRoute(<AccountPage api={fakeDashboardApi()} />, {
+      path: '/account',
+      auth: fakeAuthApi(customerUser),
+    });
     expect(await screen.findByText('cara@example.com')).toBeInTheDocument();
     expect(screen.getByText('CUSTOMER')).toBeInTheDocument();
   });

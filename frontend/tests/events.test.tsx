@@ -8,6 +8,7 @@ import { buildSeatMap, DEFAULT_SEAT_MAP_DRAFT } from '../src/features/organizer/
 import { OrganizerEventsPage } from '../src/features/organizer/OrganizerEventsPage';
 import { ApiError } from '../src/lib/apiClient';
 import { formatMoney, fromLocalInput, toLocalInput, toMinorUnits } from '../src/lib/format';
+import { fakeDashboardApi } from './dashboardFixtures';
 import { fakeAuthApi, organizerUser, renderRoute } from './testUtils';
 
 const event: PublicEvent = {
@@ -183,7 +184,7 @@ describe('OrganizerEventsPage', () => {
         ),
     } as unknown as OrganizerApi;
 
-    renderRoute(<OrganizerEventsPage api={api} />, {
+    renderRoute(<OrganizerEventsPage api={api} dashboard={fakeDashboardApi()} />, {
       path: '/organizer',
       auth: fakeAuthApi(organizerUser),
     });

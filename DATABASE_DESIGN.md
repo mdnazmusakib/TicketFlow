@@ -2,7 +2,7 @@
 
 **Database:** Supabase PostgreSQL (verified on PostgreSQL 17; tests also run on 18)
 **Ephemeral store:** Redis (seat-hold locks, OTP TTLs, counters)
-**Source of truth for the schema:** `backend/db/migrations/0001…0007` (this document and the migrations must stay identical; any change ships as a new migration plus an update here)
+**Source of truth for the schema:** `backend/db/migrations/0001…0008` (this document and the migrations must stay identical; any change ships as a new migration plus an update here)
 **Money:** integer minor units (`BIGINT`, paisa for BDT), always stored with a 3-letter `currency`.
 **Time:** all instants are `TIMESTAMPTZ` (UTC); venues keep an IANA `timezone` for display.
 
@@ -236,243 +236,7 @@ The index cannot contain `now()`, so expiry is explicit: the expiry worker flips
 
 **No double charge:** `uq_payments_one_success_per_booking` — unique `(booking_id) WHERE status = 'SUCCEEDED'`; `uq_payments_one_open_per_booking` — unique `(booking_id) WHERE status IN ('INITIATED','PENDING')` (one in-flight attempt per booking, migration 0007). Indexes `(booking_id, created_at DESC)` and `idx_payments_open (updated_at)` for reconciliation.
 
-**Migration 0007 additions:** `transaction_ref VARCHAR(30) NOT NULL UNIQUE` (`^[A-Za-z0-9_-]{8,30}# TicketFlow — Database Design
-
-**Database:** Supabase PostgreSQL (verified on PostgreSQL 17; tests also run on 18)
-**Ephemeral store:** Redis (seat-hold locks, OTP TTLs, counters)
-**Source of truth for the schema:** `backend/db/migrations/0001…0007` (this document and the migrations must stay identical; any change ships as a new migration plus an update here)
-**Money:** integer minor units (`BIGINT`, paisa for BDT), always stored with a 3-letter `currency`.
-**Time:** all instants are `TIMESTAMPTZ` (UTC); venues keep an IANA `timezone` for display.
-
----
-
-## 1. Design principles
-
-1. **PostgreSQL is authoritative** for users, inventory, bookings, money, tickets and history. Redis only reduces contention; correctness never depends on it.
-2. **Invariants live in the database**, not only in code: CHECK constraints, composite foreign keys, partial unique indexes and guard triggers. Application checks give friendly errors; the database guarantees correctness.
-3. **Every multi-step change is one transaction** on one connection (`Database.withTransaction`). Separate Supabase REST calls are never treated as atomic.
-4. **Financial and audit history is never deleted.** Bookings, payments, refunds, tickets, status history and audit logs use `ON DELETE RESTRICT`; history tables are append-only.
-5. **Retried operations are idempotent** (unique idempotency keys, unique provider/webhook ids, unique notification dedupe keys).
-6. **Charged prices are snapshots** (`booking_seats.price_minor`, `bookings.total_amount_minor`) and are immutable once written.
-7. **The Supabase Data API is closed.** Only the Express backend talks to the database (RLS on, no policies, privileges revoked from `anon`/`authenticated`).
-
----
-
-## 2. Entity overview
-
-```text
-users ─┬─< venues ─┬─< events ─┬─< seat_categories ─┬─< seats
-       │           │           │                    │
-       │           └───────────┤ (venue must belong │
-       │                       │  to the organizer) │
-       ├─< bookings >──────────┘                    │
-       │      │                                     │
-       │      ├─< booking_seats >───────────────────┘   (same-event composite FKs)
-       │      │        └──1 tickets
-       │      ├─< booking_status_history   (append-only)
-       │      ├─< payments ─┬─< refunds
-       │      │             └─< payment_webhook_events
-       │      └─< notifications
-       ├─< idempotency_keys
-       └─< audit_logs                       (append-only)
-```
-
-| Domain | Tables |
-| --- | --- |
-| Identity | `users` |
-| Catalogue | `venues`, `events`, `seat_categories`, `seats` |
-| Booking | `bookings`, `booking_seats`, `booking_status_history` |
-| Finance | `payments`, `refunds`, `payment_webhook_events` |
-| Ticketing | `tickets` |
-| Communication | `notifications` |
-| Reliability & governance | `idempotency_keys`, `audit_logs`, `schema_migrations` |
-
-All primary keys are `UUID DEFAULT gen_random_uuid()` (non-guessable, safe to expose in URLs).
-
----
-
-## 3. Conventions
-
-- Enumerations are `VARCHAR` + `CHECK (… IN (…))` instead of PostgreSQL `ENUM` types: adding a value is a simple constraint swap in a migration and mirrors the TypeScript union types.
-- Every mutable table has `created_at` and `updated_at`; `updated_at` is maintained by the `set_updated_at()` trigger so no code path can forget it.
-- Text columns have explicit maximum lengths and "not blank" checks where a blank value would be meaningless.
-- Foreign key columns used in lookups are indexed explicitly (PostgreSQL does not index referencing columns automatically).
-- `pg_trgm` is installed in the `extensions` schema (Supabase convention) for fuzzy event-title search.
-
----
-
-## 4. Tables
-
-### 4.1 `users`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `name` | VARCHAR(120) | NOT NULL, not blank |
-| `email` | VARCHAR(254) | NOT NULL, basic format check, **unique on `lower(email)`** |
-| `password_hash` | VARCHAR(255) | NOT NULL (bcrypt; plain passwords are never stored) |
-| `role` | VARCHAR(20) | NOT NULL DEFAULT `CUSTOMER`; `CUSTOMER` \| `ORGANIZER` \| `ADMIN` |
-| `email_verified` | BOOLEAN | NOT NULL DEFAULT false |
-| `email_verified_at` | TIMESTAMPTZ | set iff `email_verified` (CHECK) |
-| `is_active` | BOOLEAN | NOT NULL DEFAULT true (soft deactivation; users with history are never deleted) |
-| `last_login_at` | TIMESTAMPTZ | nullable |
-| `created_at`, `updated_at` | TIMESTAMPTZ | NOT NULL DEFAULT now() |
-
-Indexes: `uq_users_email_lower` (unique), `idx_users_role`.
-Why own auth instead of Supabase Auth: the requirements specify bcrypt + httpOnly JWT cookies + RBAC in the Express backend; the OTP lives in Redis.
-
-### 4.2 `venues`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `organizer_id` | UUID | NOT NULL → `users.id` ON DELETE RESTRICT (owner) |
-| `name` | VARCHAR(200) | NOT NULL, not blank |
-| `address` | VARCHAR(300) | NOT NULL |
-| `city` | VARCHAR(100) | NOT NULL, not blank (event search by city) |
-| `country_code` | CHAR(2) | NOT NULL DEFAULT `BD`, `^[A-Z]{2}$` |
-| `timezone` | VARCHAR(64) | NOT NULL DEFAULT `Asia/Dhaka` |
-| `created_at`, `updated_at` | TIMESTAMPTZ | |
-
-Constraints/indexes: `UNIQUE (id, organizer_id)` (target of the events composite FK), unique `(organizer_id, lower(name), lower(city))`, `idx_venues_city_lower`.
-
-### 4.3 `events`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `organizer_id` | UUID | NOT NULL → `users.id` RESTRICT |
-| `venue_id` | UUID | NOT NULL; `(venue_id, organizer_id)` → `venues(id, organizer_id)` RESTRICT — **an event can only use its own organizer's venue** |
-| `title` | VARCHAR(200) | NOT NULL, not blank; trigram index on `lower(title)` |
-| `description` | TEXT | nullable |
-| `start_at` | TIMESTAMPTZ | NOT NULL (drives 24h refund rule and 1h reminder) |
-| `end_at` | TIMESTAMPTZ | nullable, `> start_at` |
-| `status` | VARCHAR(20) | `DRAFT` (default) \| `PUBLISHED` \| `CANCELLED` \| `COMPLETED` |
-| `pricing_strategy` | VARCHAR(20) | `BASE` (default) \| `EARLY_BIRD` |
-| `early_bird_deadline` | TIMESTAMPTZ | required for `EARLY_BIRD`, must be `<= start_at`; NULL for `BASE` |
-| `early_bird_discount_pct` | SMALLINT | required for `EARLY_BIRD`, 1–99; NULL for `BASE` |
-| `currency` | CHAR(3) | NOT NULL DEFAULT `BDT` |
-| `seat_rows` | SMALLINT | 1–52 (row labels A–Z, AA–AZ) |
-| `seats_per_row` | SMALLINT | 1–100 |
-| `banner_url` | TEXT | nullable (validated upload path) |
-| `sales_start_at`, `sales_end_at` | TIMESTAMPTZ | optional window; start < end, end `<= start_at` |
-| `published_at` | TIMESTAMPTZ | required when `PUBLISHED` |
-| `cancelled_at` | TIMESTAMPTZ | set iff `CANCELLED` |
-| `created_at`, `updated_at` | TIMESTAMPTZ | |
-
-Indexes: `idx_events_organizer_start (organizer_id, start_at DESC)` (organizer dashboard), `idx_events_status_start (status, start_at)` (public browse/date filter), `idx_events_venue`, `idx_events_title_trgm` (GIN, name search).
-
-### 4.4 `seat_categories`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `event_id` | UUID | NOT NULL → `events.id` ON DELETE CASCADE |
-| `name` | VARCHAR(60) | not blank, unique per event on `lower(name)` |
-| `price_minor` | BIGINT | `>= 0` (catalogue price; charged price is snapshotted) |
-| `sort_order` | SMALLINT | DEFAULT 0 |
-| `created_at`, `updated_at` | TIMESTAMPTZ | |
-
-`UNIQUE (id, event_id)` is the target of the seats composite FK.
-
-### 4.5 `seats`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `event_id` | UUID | NOT NULL → `events.id` ON DELETE CASCADE |
-| `category_id` | UUID | `(category_id, event_id)` → `seat_categories(id, event_id)` (NO ACTION) — **category must belong to the same event** |
-| `row_label` | VARCHAR(4) | `^[A-Z]{1,2}$` |
-| `seat_number` | SMALLINT | `>= 1` |
-| `created_at` | TIMESTAMPTZ | |
-
-Constraints: `UNIQUE (event_id, row_label, seat_number)`, `UNIQUE (id, event_id)`; index `idx_seats_category`.
-Decision: `seat_number` is an integer (not text) so seat maps sort and validate naturally. The category FK is `NO ACTION` (checked at statement end) so deleting a draft event cascades to categories and seats together.
-
-### 4.6 `bookings`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `event_id` | UUID | NOT NULL → `events.id` RESTRICT |
-| `customer_id` | UUID | NOT NULL → `users.id` RESTRICT |
-| `status` | VARCHAR(20) | `HELD` (default) \| `PENDING_PAYMENT` \| `CONFIRMED` \| `EXPIRED` \| `CANCELLED` |
-| `hold_expires_at` | TIMESTAMPTZ | required while `HELD`/`PENDING_PAYMENT` (now + 300 s) |
-| `pricing_strategy` | VARCHAR(20) | snapshot of the strategy applied (`BASE`/`EARLY_BIRD`) |
-| `total_amount_minor` | BIGINT | `>= 0`, server-calculated, **immutable** |
-| `refund_amount_minor` | BIGINT | DEFAULT 0, `0 <= refund <= total`, non-zero only when `CANCELLED` |
-| `currency` | CHAR(3) | immutable |
-| `idempotency_key` | VARCHAR(255) | nullable; unique per customer (`uq_bookings_customer_idempotency`, partial) |
-| `confirmed_at` / `cancelled_at` / `expired_at` | TIMESTAMPTZ | each required when in that status |
-| `cancellation_reason` | TEXT | nullable |
-| `reminder_sent_at` | TIMESTAMPTZ | set once the ≥1h pre-event reminder is dispatched; only on confirmed bookings |
-| `created_at`, `updated_at` | TIMESTAMPTZ | |
-
-Indexes:
-- `idx_bookings_customer_created (customer_id, created_at DESC)` — "my bookings".
-- `idx_bookings_customer_event_active (customer_id, event_id) WHERE status IN (HELD, PENDING_PAYMENT, CONFIRMED)` — per-user ticket limit lookup.
-- `idx_bookings_hold_expiry (hold_expires_at) WHERE status IN (HELD, PENDING_PAYMENT)` — expiry worker.
-- `idx_bookings_reminder_pending (event_id) WHERE status = 'CONFIRMED' AND reminder_sent_at IS NULL` — reminder worker.
-- `idx_bookings_event_status (event_id, status)`.
-
-`payment_provider` / `payment_ref` from the original sketch were moved to `payments`: one booking may have several payment attempts.
-
-### 4.7 `booking_seats`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `booking_id`, `event_id` | UUID | `(booking_id, event_id)` → `bookings(id, event_id)` RESTRICT |
-| `seat_id`, `event_id` | UUID | `(seat_id, event_id)` → `seats(id, event_id)` RESTRICT — **booking and seat must be in the same event** |
-| `price_minor` | BIGINT | `>= 0`, price snapshot, immutable |
-| `seat_state` | VARCHAR(10) | `HELD` (default) \| `BOOKED` \| `RELEASED` |
-| `released_at` | TIMESTAMPTZ | set iff `RELEASED` |
-| `created_at`, `updated_at` | TIMESTAMPTZ | |
-
-**Double-booking guard:**
-
-```sql
-CREATE UNIQUE INDEX idx_active_seat_per_event
-  ON booking_seats (event_id, seat_id)
-  WHERE seat_state IN ('HELD', 'BOOKED');
-```
-
-Concurrent inserts for the same seat serialise on this index; exactly one commits, the others fail with `23505`. Released rows stay as history and can never be re-activated (trigger), so a freed seat is always re-allocated through a new row that is checked by the index again. Other: `UNIQUE (booking_id, seat_id)`, indexes on `booking_id`, `seat_id`.
-
-The index cannot contain `now()`, so expiry is explicit: the expiry worker flips expired holds to `RELEASED` inside a transaction (§5.3).
-
-### 4.8 `booking_status_history` (append-only)
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `booking_id` | UUID | → `bookings.id` RESTRICT |
-| `from_status` | VARCHAR(20) | NULL only for the first row, which must be `→ HELD` |
-| `to_status` | VARCHAR(20) | NOT NULL, `<> from_status` |
-| `reason` | TEXT | e.g. `seat hold`, `payment verified`, `hold expired`, `customer cancelled` |
-| `actor_user_id` | UUID | → `users.id`, NULL for system actions (workers, webhooks) |
-| `changed_at` | TIMESTAMPTZ | DEFAULT now() |
-
-`UPDATE`/`DELETE` are blocked by `prevent_mutation()`. Written in the same transaction as each status change. Index `(booking_id, changed_at)`.
-
-### 4.9 `payments`
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | PK |
-| `booking_id` | UUID | → `bookings.id` RESTRICT |
-| `provider` | VARCHAR(30) | `MOCK_PROVIDER_A` \| `MOCK_PROVIDER_B` \| `SSLCOMMERZ` |
-| `provider_payment_id` | VARCHAR(255) | provider transaction id; `UNIQUE (provider, provider_payment_id)` |
-| `amount_minor` | BIGINT | `> 0`, must equal the booking total (verified server-side) |
-| `currency` | CHAR(3) | |
-| `status` | VARCHAR(20) | `INITIATED` (default) \| `PENDING` \| `SUCCEEDED` \| `FAILED` \| `CANCELLED` |
-| `idempotency_key` | VARCHAR(255) | NOT NULL, UNIQUE |
-| `failure_reason` | TEXT | nullable |
-| `provider_metadata` | JSONB | non-sensitive metadata only (never card data or secrets) |
-| `paid_at` | TIMESTAMPTZ | set iff `SUCCEEDED` |
-| `created_at`, `updated_at` | TIMESTAMPTZ | |
-
-) is the merchant transaction id sent to providers (SSLCommerz `tran_id` allows 30 chars) and their idempotency key. `idempotency_key` stores `pay_` + sha256(user, Idempotency-Key): the durable anchor that makes a retried request resume the same attempt instead of charging again.
+**Migration 0007 additions:** `transaction_ref VARCHAR(30) NOT NULL UNIQUE` (`^[A-Za-z0-9_-]{8,30}$`) is the merchant transaction id sent to providers (SSLCommerz `tran_id` allows 30 chars) and their idempotency key. `idempotency_key` stores `pay_` + sha256(user, Idempotency-Key): the durable anchor that makes a retried request resume the same attempt instead of charging again.
 
 **Status guard** (`enforce_payment_transition`): created `INITIATED`; `INITIATED → PENDING | SUCCEEDED | FAILED | CANCELLED`; `PENDING → SUCCEEDED | FAILED | CANCELLED`; `FAILED | CANCELLED → SUCCEEDED` (a later verified capture is always recorded, then refunded if it cannot be used); `SUCCEEDED` is terminal; amount, currency, booking, provider and reference are immutable.
 
@@ -540,7 +304,7 @@ Both the in-app inbox and the email delivery queue (one row per channel per mess
 | `title` | VARCHAR(200) | |
 | `message` | TEXT | |
 | `dedupe_key` | VARCHAR(255) | NOT NULL UNIQUE, e.g. `EVENT_REMINDER_1H:<booking_id>:EMAIL` |
-| `delivery_status` | VARCHAR(20) | `PENDING` \| `PROCESSING` \| `SENT` \| `FAILED` |
+| `delivery_status` | VARCHAR(20) | `PENDING` \| `PROCESSING` \| `SENT` \| `FAILED` \| `SKIPPED` (0008: reminder whose event already started) |
 | `attempts` | SMALLINT | `>= 0` |
 | `next_attempt_at` | TIMESTAMPTZ | retry scheduling |
 | `last_error` | TEXT | |
@@ -548,8 +312,10 @@ Both the in-app inbox and the email delivery queue (one row per channel per mess
 | `is_read` / `read_at` | BOOLEAN / TIMESTAMPTZ | consistent pair; only `IN_APP` rows can be read |
 | `created_at` | TIMESTAMPTZ | |
 
-Indexes: inbox `(user_id, created_at DESC) WHERE channel = 'IN_APP'`, unread variant, delivery queue `(next_attempt_at) WHERE delivery_status IN (PENDING, FAILED)` claimed with `FOR UPDATE SKIP LOCKED`, `booking_id`.
+Indexes: inbox `(user_id, created_at DESC) WHERE channel = 'IN_APP'`, unread variant, delivery queue `idx_notifications_delivery_queue (next_attempt_at) WHERE delivery_status IN (PENDING, PROCESSING, FAILED)` (0008 adds `PROCESSING` so expired leases are reclaimed), `booking_id`. Migration 0008 also adds `idx_events_start_published (start_at) WHERE status = 'PUBLISHED'` for the reminder scan.
 Decision: a dedicated outbox table was folded into `notifications`. Rows are inserted in the same transaction as the booking change (transactional outbox), and `dedupe_key` makes confirmation/cancellation/reminder dispatch idempotent even if a worker retries. New channels only add a `channel` value and a `NotificationChannel` implementation.
+
+**Delivery (Phase 5: `NotificationDispatcher`).** A `BookingLifecycle` observer enqueues `BOOKING_CONFIRMED` / `BOOKING_CANCELLED` rows (one per channel) inside the transition's transaction: a rollback removes them, a commit can never lose them. Workers claim due rows (`attempts < NOTIFICATION_MAX_ATTEMPTS`, `next_attempt_at <= now()`) with `FOR UPDATE SKIP LOCKED`, set `PROCESSING`, `attempts + 1` and a 5-minute lease in `next_attempt_at`. Success → `SENT`; failure → `FAILED` with backoff 30 s · 2^(n−1), capped at 30 min; a crashed worker's row becomes due again when its lease ends. Delivery is at-least-once; the dedupe key is sent as the email `Message-ID`. The in-app inbox shows only `IN_APP` rows with `delivery_status = 'SENT'`, and every inbox query filters on `user_id`, so another user's notification behaves like a missing one (404).
 
 ### 4.14 `idempotency_keys`
 
@@ -624,7 +390,7 @@ An open payment attempt is verified with the provider before cancelling (a compl
 
 ### 5.6 Pre-event reminder
 
-Worker selects confirmed bookings with `reminder_sent_at IS NULL` whose event starts within the next hour, inserts `EVENT_REMINDER_1H` notifications (dedupe keys make re-runs harmless) and sets `reminder_sent_at`.
+Phase 5 `ReminderService`, run by the notification worker every `NOTIFICATION_WORKER_INTERVAL_MS`. One transaction selects `CONFIRMED` bookings with `reminder_sent_at IS NULL` of `PUBLISHED` events where `now() + 1 h <= start_at <= now() + REMINDER_WINDOW_MINUTES` (default 120), locked `FOR UPDATE OF b SKIP LOCKED`; for each it sets `reminder_sent_at` and inserts the Email + In-App `EVENT_REMINDER_1H` rows. Result: a reminder always arrives at least 1 hour before the start; parallel or restarted workers never schedule it twice (row lock + marker + dedupe key); a booking with less than 1 hour left is not reminded; a queued reminder whose event has started by delivery time is marked `SKIPPED` instead of sent.
 
 ---
 

@@ -19,22 +19,55 @@ export interface TransitionResult {
   affectedSeatIds: string[];
 }
 
+export interface TransitionContext {
+  reason: string;
+  actorId: string | null;
+  cancellationReason?: string | null;
+  /** Extra facts for observers (e.g. the refund decision of a cancellation). */
+  details?: Record<string, unknown>;
+}
+
+export interface BookingTransitionEvent {
+  booking: BookingCore;
+  from: BookingStatus;
+  to: BookingStatus;
+  context: TransitionContext;
+}
+
+/**
+ * Observer of booking status changes. Runs INSIDE the transaction that makes
+ * the change, so whatever it writes (e.g. notification outbox rows) commits or
+ * rolls back together with the status change.
+ */
+export type BookingTransitionListener = (
+  tx: Queryable,
+  event: BookingTransitionEvent,
+) => Promise<void>;
+
 /**
  * The single place where booking status changes are written. Every change:
  * 1. is validated against the central state machine (invalid -> throws),
  * 2. applies the matching seat-allocation change,
  * 3. appends booking_status_history,
+ * 4. notifies registered listeners (Observer pattern: notifications plug in
+ *    here without changing booking code),
  * all inside the caller's transaction (the booking row must already be locked).
  * The database trigger re-validates the same map as a safety net.
  */
 export class BookingLifecycle {
+  private readonly listeners: BookingTransitionListener[] = [];
+
   constructor(private readonly bookings: BookingRepository) {}
+
+  onTransition(listener: BookingTransitionListener): void {
+    this.listeners.push(listener);
+  }
 
   async transition(
     tx: Queryable,
     booking: BookingCore,
     to: BookingStatus,
-    context: { reason: string; actorId: string | null; cancellationReason?: string | null },
+    context: TransitionContext,
   ): Promise<TransitionResult> {
     assertBookingTransition(booking.status, to);
     await this.bookings.setStatus(tx, booking.id, to, {
@@ -51,6 +84,9 @@ export class BookingLifecycle {
       reason: context.reason,
       actorId: context.actorId,
     });
+    for (const listener of this.listeners) {
+      await listener(tx, { booking, from: booking.status, to, context });
+    }
     return { booking: { ...booking, status: to }, affectedSeatIds };
   }
 }

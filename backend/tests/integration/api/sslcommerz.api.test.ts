@@ -151,6 +151,7 @@ describe('SSLCommerz integration (adapter against a simulated sandbox API)', () 
     expect(cancelled.body.data.refundDecision.refundable).toBe(true);
     expect(cancelled.body.data.refunds[0]).toMatchObject({ status: 'PROCESSING' });
     expect(ssl.refundCalls).toBe(1);
+    expect(ssl.refundTransIds[0]).toMatch(/^RT[0-9a-f]{28}$/);
 
     const refundId = cancelled.body.data.refunds[0].id as string;
     await h.testDb.db.query(

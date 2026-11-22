@@ -27,7 +27,18 @@ export interface SslCommerzConfig {
 
 type FetchLike = typeof fetch;
 
+/** Statuses that mean the customer's payment definitely did not go through. */
+const FAILED_STATUSES = new Set(['FAILED', 'CANCELLED', 'EXPIRED', 'INVALID_TRANSACTION']);
+
 const md5 = (value: string) => createHash('md5').update(value).digest('hex');
+
+/**
+ * Stable, unique refund transaction id (SSLCommerz `refund_trans_id`, max 30 chars) derived from
+ * our refund attempt's idempotency key, so a re-sent attempt carries the same id.
+ */
+export function refundTransactionId(idempotencyKey: string): string {
+  return `RT${createHash('sha256').update(idempotencyKey).digest('hex').slice(0, 28)}`;
+}
 
 /** Minor units -> "1234.50" (SSLCommerz expects decimal amounts). */
 export function toDecimalAmount(minor: number): string {
@@ -203,9 +214,12 @@ export class SslCommerzAdapter implements PaymentGateway {
       }
       return { status: 'SUCCEEDED', ...base };
     }
-    if (status === 'PENDING' || status === 'UNATTEMPTED' || status === '')
-      return { status: 'PENDING', ...base };
-    return { status: 'FAILED', ...base, failureReason: `SSLCommerz status ${status}` };
+    // Only explicit terminal failures close the attempt. The sandbox reports a fresh, unpaid
+    // session as "PROCESSING"; anything not clearly failed stays open and is re-checked later.
+    if (FAILED_STATUSES.has(status)) {
+      return { status: 'FAILED', ...base, failureReason: `SSLCommerz status ${status}` };
+    }
+    return { status: 'PENDING', ...base };
   }
 
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentResult> {
@@ -213,10 +227,14 @@ export class SslCommerzAdapter implements PaymentGateway {
     if (typeof bankTranId !== 'string' || !bankTranId) {
       return { status: 'FAILED', failureReason: 'Missing bank_tran_id for refund' };
     }
+    // Initiate Refund API (SSLCommerz v4): bank_tran_id, refund_trans_id (unique, ≤30 chars,
+    // mandatory since 2025-02-24), refund_amount (decimal 10,2), refund_remarks (≤255),
+    // optional refe_id (≤50) for our own reconciliation.
     const body = await this.query('/validator/api/merchantTransIDvalidationAPI.php', {
       bank_tran_id: bankTranId,
+      refund_trans_id: refundTransactionId(input.idempotencyKey),
       refund_amount: toDecimalAmount(input.amountMinor),
-      refund_remarks: input.reason.slice(0, 255),
+      refund_remarks: (input.reason || 'Refund').slice(0, 255),
       refe_id: input.idempotencyKey.slice(0, 50),
     });
     const refId = typeof body.refund_ref_id === 'string' ? body.refund_ref_id : undefined;
@@ -239,13 +257,16 @@ export class SslCommerzAdapter implements PaymentGateway {
     const status = String(body.status ?? '').toLowerCase();
     if (status === 'refunded')
       return { status: 'SUCCEEDED', providerRefundId: input.providerRefundId };
-    if (status === 'processing')
-      return { status: 'PROCESSING', providerRefundId: input.providerRefundId };
-    return {
-      status: 'FAILED',
-      providerRefundId: input.providerRefundId,
-      failureReason: `Refund ${status || 'unknown'}`,
-    };
+    if (status === 'cancelled') {
+      return {
+        status: 'FAILED',
+        providerRefundId: input.providerRefundId,
+        failureReason: 'Refund cancelled by SSLCommerz',
+      };
+    }
+    // "processing", or an unreadable answer (e.g. APIConnect not DONE): keep polling rather than
+    // starting a new refund attempt, which could refund twice.
+    return { status: 'PROCESSING', providerRefundId: input.providerRefundId };
   }
 
   parseWebhook(request: WebhookRequest): ParsedWebhook {

@@ -793,3 +793,122 @@ fieldset {
   display: grid;
   gap: 0.75rem;
 }
+
+/* Dashboards */
+.stat-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  margin: 0 0 1.5rem;
+}
+
+.stat {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+}
+
+.stat__label {
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}
+
+.stat__value {
+  margin: 0.2rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.stat__hint {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.chips--static {
+  list-style: none;
+  padding: 0;
+  margin-top: 0;
+}
+
+.chip--static {
+  cursor: default;
+  text-transform: capitalize;
+}
+
+.dashboard {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.dashboard__columns {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.meter {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.meter__fill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+}
+
+/* Notifications */
+.nav__bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.nav__count {
+  min-width: 1.3rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.3rem;
+}
+
+.notification {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 0.25rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.notification--unread {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 0.6rem;
+}
+
+.notification__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.notification__message {
+  margin: 0;
+  white-space: pre-line;
+}

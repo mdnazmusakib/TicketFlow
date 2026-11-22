@@ -34,7 +34,7 @@ describe('Health API (real PostgreSQL + Redis mock)', () => {
     expect(response.body.data.status).toBe('ok');
     expect(response.body.data.checks.database).toMatchObject({
       status: 'up',
-      details: { schemaVersion: '0007' },
+      details: { schemaVersion: '0008' },
     });
     expect(response.body.data.checks.redis).toMatchObject({ status: 'up' });
     expect((await request(h.app).get('/api/health')).status).toBe(200);

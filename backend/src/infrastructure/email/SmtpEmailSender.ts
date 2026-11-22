@@ -21,6 +21,14 @@ export class SmtpEmailSender implements EmailSender {
   }
 
   async send(message: EmailMessage): Promise<void> {
-    await this.transporter.sendMail({ from: this.from, ...message });
+    const { idempotencyKey, ...content } = message;
+    await this.transporter.sendMail({
+      from: this.from,
+      ...content,
+      // A stable Message-ID lets receiving servers collapse a retried duplicate.
+      ...(idempotencyKey
+        ? { messageId: `<${idempotencyKey.replace(/[^A-Za-z0-9._-]/g, '.')}@ticketflow>` }
+        : {}),
+    });
   }
 }

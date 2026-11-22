@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useAuth } from '../../features/auth/AuthContext';
+import { NotificationBell } from '../../features/notifications/NotificationBell';
 
 interface NavItem {
   to: string;
@@ -19,8 +20,10 @@ export function Header() {
   ];
   if (user && (user.role === 'ORGANIZER' || user.role === 'ADMIN'))
     items.push({ to: '/organizer', label: 'Organizer' });
+  if (user?.role === 'ADMIN') items.push({ to: '/admin', label: 'Admin' });
   if (user?.role === 'CUSTOMER') items.push({ to: '/bookings', label: 'My bookings' });
-  if (user) items.push({ to: '/account', label: 'Account' });
+  if (user)
+    items.push({ to: '/account', label: user.role === 'CUSTOMER' ? 'Dashboard' : 'Account' });
   if (status === 'anonymous') {
     items.push({ to: '/login', label: 'Sign in' }, { to: '/register', label: 'Register' });
   }
@@ -61,6 +64,7 @@ export function Header() {
               {item.label}
             </NavLink>
           ))}
+          {user && <NotificationBell onNavigate={() => setOpen(false)} />}
           {user && (
             <button type="button" className="nav__link link-button" onClick={onLogout}>
               Sign out ({user.name})

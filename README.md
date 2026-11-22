@@ -2,7 +2,7 @@
 
 Event ticket booking platform: organizers publish events with seat maps and pricing strategies, customers hold seats (5-minute holds, max 6 tickets per event), pay through pluggable gateways and get email + in-app notifications.
 
-> **Status: Phase 4 complete.** Phases 1–3 plus payments through a provider-agnostic gateway (Mock Provider A, Mock Provider B, SSLCommerz), idempotent payment initiation, verified webhooks/IPN, booking confirmation only after server-side verification, customer cancellation with the 24-hour refund rule, and retried refunds. Notifications arrive in a later phase.
+> **Status: Phase 5 complete.** Phases 1–4 (auth, events, seat holds, payments through Mock Provider A/B and SSLCommerz, cancellation and refunds) plus Email + In-App notifications through a transactional outbox (booking confirmation, cancellation, reminder at least 1 hour before the event), the in-app inbox, and customer, organizer and admin dashboards.
 
 ## Demo credentials
 
@@ -109,6 +109,9 @@ npm run dev:frontend                         # http://localhost:5173 (proxies /a
 | `SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWORD` | for SSLCommerz | Sandbox or live store credentials (never committed) |
 | `SSLCOMMERZ_SANDBOX` | no (true) | `false` switches to securepay.sslcommerz.com |
 | `SSLCOMMERZ_CUSTOMER_PHONE` | no | Phone sent to SSLCommerz (required field; not collected from users) |
+| `REMINDER_WINDOW_MINUTES` | no (120) | Reminders go out when the event starts within this window, never with less than 1 hour left (61–10080) |
+| `NOTIFICATION_MAX_ATTEMPTS` | no (8) | Delivery attempts per notification before it stays `FAILED` |
+| `NOTIFICATION_WORKER_INTERVAL_MS` | no (15000) | How often reminders are scheduled and the outbox is drained |
 | `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | for smtp | Mail server settings |
 
 The server validates every variable at startup and exits listing invalid names (never values).
@@ -153,6 +156,13 @@ The server validates every variable at startup and exits listing invalid names (
 | GET · POST | `/api/bookings/:id/cancellation` · `/api/bookings/:id/cancel` | Refund preview / cancel (HELD, PENDING_PAYMENT, CONFIRMED with the 24 h rule) |
 | POST | `/api/bookings/:id/refunds/retry` | Retry a failed refund |
 | POST | `/api/bookings/:id/checkout` | HELD → PENDING_PAYMENT without starting a payment |
+| GET | `/api/notifications` | My in-app notifications: `unreadOnly=true`, `page`, `pageSize` (meta includes `unreadCount`) |
+| GET | `/api/notifications/unread-count` | Badge count |
+| POST | `/api/notifications/:id/read` · `/api/notifications/read-all` | Mark one (404 if not yours) / all as read |
+| GET | `/api/dashboard/customer` | Profile, booking/payment/refund stats, upcoming bookings, recent notifications |
+| GET | `/api/dashboard/organizer` | ORGANIZER (own events) / ADMIN (all): revenue, seats sold/held, events and bookings by status, upcoming events with pricing |
+| GET | `/api/dashboard/organizer/events/:id` | One event: sales, category breakdown, bookings with masked customer emails (`status`, `page`, `pageSize`) |
+| GET | `/api/admin/overview` · `/api/admin/users` | ADMIN only: platform totals, failed refunds, open payments, notification delivery; user directory (`q`, `role`, pages) |
 | * | `/api/organizer/venues[/:id]` | Venue CRUD (ORGANIZER own / ADMIN all) |
 | * | `/api/organizer/events[/:id]` | Event CRUD, `PUT …/seat-map`, `PATCH …/categories/:categoryId`, `PATCH …/seats/category`, `POST …/publish|unpublish|cancel` |
 
@@ -163,7 +173,8 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 - **Unit** (`backend/tests/unit`): config validation, log redaction, CORS, state machines, middlewares, error mapping, transaction retry logic, Redis lock/TTL primitives (ioredis-mock), seed data.
 - **Integration** (`backend/tests/integration`): runs against a real throwaway PostgreSQL started automatically (`embedded-postgres`, or set `TEST_DATABASE_URL`). Covers migrations, double-booking under 8 concurrent transactions, composite FKs, trigger/state-machine parity, payments/refunds uniqueness, transactions, the seeder and the HTTP health API.
 - **Live** (`backend/tests/live`): read-only checks against your Supabase and Redis (migrated schema, RLS/privilege lockdown, demo data, real transaction rolled back, Redis locks/TTL).
-- **Frontend** (`frontend/tests`): API client, auth flows (login, register, OTP, protected routes, open-redirect guard), events list/details, organizer venues/events/seat map editor, error boundaries.
+- **Frontend** (`frontend/tests`): API client, auth flows (login, register, OTP, protected routes, open-redirect guard), events list/details, organizer venues/events/seat map editor, booking/payment flows, notification bell and inbox, customer/organizer/admin dashboards, error boundaries.
+- **Notifications** (`backend/tests/integration/api/notifications.api.test.ts`): Email + In-App delivery, enqueue-in-transaction and rollback, dedupe, retry with backoff, max attempts, expired-lease reclaim, parallel workers (exactly once), cancellation refund wording, reminder window / <1 h / started-event skip / parallel schedulers, inbox ownership, pagination and read state. Dashboards: `dashboard.api.test.ts` (stats, ownership 404, RBAC 403, masked emails, admin search).
 - **Auth & authorization coverage** (`backend/tests/integration/api`): OTP hashing, expiry, attempt limit, replay, resend cooldown, bypass mode, cookie flags, forged/`alg:none`/revoked tokens, RBAC (401/403), IDOR on venues and events (404), destructive-change guards with active bookings, public discovery filters and data exposure.
 
 ## Testing payments on localhost
@@ -174,6 +185,14 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
    - **SSLCommerz**: needs `SSLCOMMERZ_STORE_ID` / `SSLCOMMERZ_STORE_PASSWORD` (free sandbox account at developer.sslcommerz.com). For the IPN to reach your laptop, expose the API with a tunnel and set `PUBLIC_API_URL`; without the IPN, the browser return and the status page still validate server-side.
 2. **Cancel** a confirmed booking: the dialog shows the refund decision first. Events more than 24 hours away get a full refund; within 24 hours, none. "Classical Evening (starts soon)" shows the no-refund case (re-run `npm run db:seed` to move it 3 hours ahead again).
 3. Refund status appears on the booking page; failed refunds can be retried and are also retried automatically.
+
+## Testing notifications and dashboards on localhost
+
+1. With `EMAIL_TRANSPORT=console` (default) every email is printed in the **backend terminal** under `[DEV MAIL]`.
+2. Book and pay as `customer.demo@example.com`: within a second the confirmation email appears in the terminal and the 🔔 **Notifications** badge in the header shows 1. Open it to read, mark one or all as read.
+3. Cancel the booking: a cancellation email + in-app notification states the refund outcome.
+4. **Reminder**: book an event that starts in 1–2 hours (create one as the organizer with a start time ~90 minutes ahead). Within `NOTIFICATION_WORKER_INTERVAL_MS` the reminder email and in-app notification arrive, once only. Events less than 1 hour away are not reminded.
+5. **Dashboards**: customers see `/account` (stats, upcoming bookings, notifications); organizers see sales and booking statistics on `/organizer` and per-event bookings via **Bookings**; `admin.demo@example.com` gets `/admin` with platform totals and the user directory.
 
 ## Testing seat booking on localhost
 
