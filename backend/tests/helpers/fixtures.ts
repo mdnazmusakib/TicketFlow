@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Queryable } from '../../src/infrastructure/database/types';
 
 /** Minimal valid rows for schema tests. Password hashes are dummies (never verified). */
-export async function insertUser(db: Queryable, role: 'CUSTOMER' | 'ORGANIZER' | 'ADMIN' = 'CUSTOMER'): Promise<string> {
+export async function insertUser(
+  db: Queryable,
+  role: 'CUSTOMER' | 'ORGANIZER' | 'ADMIN' = 'CUSTOMER',
+): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, 'x', $3) RETURNING id`,
     [`${role} user`, `${randomUUID()}@example.com`, role],
@@ -77,7 +80,9 @@ export async function holdSeat(
 }
 
 /** Captures the PostgreSQL error code (SQLSTATE) and constraint of a failing statement. */
-export async function pgFailure(promise: Promise<unknown>): Promise<{ code?: string; constraint?: string; message: string }> {
+export async function pgFailure(
+  promise: Promise<unknown>,
+): Promise<{ code?: string; constraint?: string; message: string }> {
   try {
     await promise;
   } catch (error) {

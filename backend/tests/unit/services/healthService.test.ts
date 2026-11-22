@@ -1,4 +1,8 @@
-import { PostgresHealthProbe, RedisHealthProbe, type HealthProbe } from '../../../src/repositories/HealthProbes';
+import {
+  PostgresHealthProbe,
+  RedisHealthProbe,
+  type HealthProbe,
+} from '../../../src/repositories/HealthProbes';
 import { HealthService } from '../../../src/services/HealthService';
 
 const probe = (name: string, check: HealthProbe['check']): HealthProbe => ({ name, check });
@@ -22,12 +26,18 @@ describe('HealthService', () => {
 
   it('is ready when every probe passes and includes probe details', async () => {
     const service = new HealthService(
-      [probe('database', async () => ({ schemaVersion: '0006' })), probe('redis', async () => undefined)],
+      [
+        probe('database', async () => ({ schemaVersion: '0006' })),
+        probe('redis', async () => undefined),
+      ],
       { timeoutMs: 100, version: 'x' },
     );
     const report = await service.readiness();
     expect(report.status).toBe('ok');
-    expect(report.checks.database).toMatchObject({ status: 'up', details: { schemaVersion: '0006' } });
+    expect(report.checks.database).toMatchObject({
+      status: 'up',
+      details: { schemaVersion: '0006' },
+    });
     expect(report.checks.redis).toEqual({ status: 'up', latencyMs: expect.any(Number) });
   });
 
@@ -35,7 +45,9 @@ describe('HealthService', () => {
     const service = new HealthService(
       [
         probe('database', async () => {
-          throw Object.assign(new Error('password authentication failed for user postgres'), { code: 'ECONNREFUSED' });
+          throw Object.assign(new Error('password authentication failed for user postgres'), {
+            code: 'ECONNREFUSED',
+          });
         }),
         probe('redis', async () => {
           throw new Error('secret detail');
@@ -45,7 +57,10 @@ describe('HealthService', () => {
     );
     const report = await service.readiness();
     expect(report.status).toBe('unavailable');
-    expect(report.checks.database).toMatchObject({ status: 'down', error: 'unreachable (ECONNREFUSED)' });
+    expect(report.checks.database).toMatchObject({
+      status: 'down',
+      error: 'unreachable (ECONNREFUSED)',
+    });
     expect(report.checks.redis).toMatchObject({ status: 'down', error: 'unreachable' });
     expect(JSON.stringify(report)).not.toContain('password');
   });
@@ -60,20 +75,29 @@ describe('HealthService', () => {
   });
 
   it('summarises non-Error rejections', async () => {
-    const service = new HealthService([probe('x', () => Promise.reject('nope'))], { timeoutMs: 50, version: 'x' });
+    const service = new HealthService([probe('x', () => Promise.reject('nope'))], {
+      timeoutMs: 50,
+      version: 'x',
+    });
     expect((await service.readiness()).checks.x?.error).toBe('unreachable');
   });
 });
 
 describe('health probes', () => {
   it('RedisHealthProbe requires PONG', async () => {
-    await expect(new RedisHealthProbe({ ping: async () => 'PONG' }).check()).resolves.toBeUndefined();
-    await expect(new RedisHealthProbe({ ping: async () => 'NOPE' }).check()).rejects.toThrow('Unexpected PING reply');
+    await expect(
+      new RedisHealthProbe({ ping: async () => 'PONG' }).check(),
+    ).resolves.toBeUndefined();
+    await expect(
+      new RedisHealthProbe({ ping: async () => 'NOPE' } as never).check(),
+    ).rejects.toThrow('Unexpected PING reply');
   });
 
   it('PostgresHealthProbe reports null schema version before migrations', async () => {
     const query = jest.fn().mockResolvedValueOnce({ rows: [{ migrated: false }] });
-    await expect(new PostgresHealthProbe({ query } as never).check()).resolves.toEqual({ schemaVersion: null });
+    await expect(new PostgresHealthProbe({ query } as never).check()).resolves.toEqual({
+      schemaVersion: null,
+    });
     expect(query).toHaveBeenCalledTimes(1);
   });
 });

@@ -19,6 +19,10 @@ export const RedisKeys = {
   seatHoldPattern: (eventId: string): string => `seat_hold:${segment(eventId)}:*`,
   /** Email OTP (stored hashed), TTL 300s. */
   otp: (email: string): string => `otp:${segment(email.toLowerCase())}`,
+  /** Resend cooldown marker (prevents OTP flooding). */
+  otpCooldown: (email: string): string => `otp_cooldown:${segment(email.toLowerCase())}`,
+  /** Revoked JWT id (logout), kept until the token would have expired. */
+  revokedToken: (jti: string): string => `revoked_jwt:${segment(jti)}`,
   /** OTP verification attempt counter. */
   otpAttempts: (email: string): string => `otp_attempts:${segment(email.toLowerCase())}`,
 } as const;

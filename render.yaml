@@ -1,0 +1,72 @@
+# Render Blueprint: TicketFlow API as a native Node web service (no Docker).
+# Frontend is deployed separately on Vercel (frontend/vercel.json).
+# Secrets (sync: false) are entered in the Render dashboard; nothing secret is committed.
+services:
+  - type: web
+    name: ticketflow-api
+    runtime: node
+    plan: free
+    branch: main
+    # Deploy every push to main, but only after the GitHub Actions checks pass.
+    autoDeployTrigger: checksPass
+    # The repository root holds the npm workspaces lockfile.
+    buildCommand: npm ci --include=dev --workspace backend && npm run build -w backend && npm run db:migrate:prod -w backend
+    startCommand: npm run start -w backend
+    healthCheckPath: /api/health/ready
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      # Render's proxy + Vercel's proxy in front of the API.
+      - key: TRUST_PROXY
+        value: '2'
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: 'true'
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: PUBLIC_API_URL
+        sync: false
+      - key: EMAIL_TRANSPORT
+        value: smtp
+      - key: EMAIL_FROM
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: '587'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      # Free instances have an ephemeral filesystem: store banners in Supabase Storage.
+      - key: STORAGE_DRIVER
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Demo deployment: keep the mock providers so reviewers can pay without real money.
+      # Set to 'false' for a real launch (SSLCommerz only).
+      - key: ENABLE_MOCK_PAYMENTS
+        value: 'true'
+      - key: MOCK_PAYMENT_WEBHOOK_SECRET
+        generateValue: true
+      - key: SSLCOMMERZ_STORE_ID
+        sync: false
+      - key: SSLCOMMERZ_STORE_PASSWORD
+        sync: false
+      - key: SSLCOMMERZ_SANDBOX
+        value: 'true'
+      - key: SSLCOMMERZ_CUSTOMER_PHONE
+        sync: false

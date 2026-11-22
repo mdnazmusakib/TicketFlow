@@ -17,9 +17,15 @@ describe('Database transactions (real PostgreSQL)', () => {
   });
 
   it('commits every statement of a successful transaction', async () => {
-    const ids = await testDb.db.withTransaction(async (tx) => [await insertUser(tx), await insertUser(tx)]);
-    const { rows } = await testDb.db.query('SELECT count(*)::int AS n FROM users WHERE id = ANY($1)', [ids]);
-    expect(rows[0].n).toBe(2);
+    const ids = await testDb.db.withTransaction(async (tx) => [
+      await insertUser(tx),
+      await insertUser(tx),
+    ]);
+    const { rows } = await testDb.db.query(
+      'SELECT count(*)::int AS n FROM users WHERE id = ANY($1)',
+      [ids],
+    );
+    expect(rows[0]?.n).toBe(2);
   });
 
   it('rolls back every statement when any statement fails', async () => {
@@ -27,21 +33,31 @@ describe('Database transactions (real PostgreSQL)', () => {
     await expect(
       testDb.db.withTransaction(async (tx) => {
         createdId = await insertUser(tx);
-        await tx.query(`INSERT INTO users (name, email, password_hash, role) VALUES ('x', 'bad', 'x', 'CUSTOMER')`);
+        await tx.query(
+          `INSERT INTO users (name, email, password_hash, role) VALUES ('x', 'bad', 'x', 'CUSTOMER')`,
+        );
       }),
     ).rejects.toMatchObject({ code: '23514' });
-    const { rows } = await testDb.db.query('SELECT count(*)::int AS n FROM users WHERE id = $1', [createdId]);
-    expect(rows[0].n).toBe(0);
+    const { rows } = await testDb.db.query('SELECT count(*)::int AS n FROM users WHERE id = $1', [
+      createdId,
+    ]);
+    expect(rows[0]?.n).toBe(0);
   });
 
   it('retries SERIALIZABLE conflicts so both transactions eventually succeed', async () => {
-    await testDb.db.query('CREATE TABLE IF NOT EXISTS counters (id int PRIMARY KEY, value int NOT NULL)');
-    await testDb.db.query('INSERT INTO counters VALUES (1, 0) ON CONFLICT (id) DO UPDATE SET value = 0');
+    await testDb.db.query(
+      'CREATE TABLE IF NOT EXISTS counters (id int PRIMARY KEY, value int NOT NULL)',
+    );
+    await testDb.db.query(
+      'INSERT INTO counters VALUES (1, 0) ON CONFLICT (id) DO UPDATE SET value = 0',
+    );
 
     const increment = () =>
       testDb.db.withTransaction(
         async (tx) => {
-          const { rows } = await tx.query<{ value: number }>('SELECT value FROM counters WHERE id = 1');
+          const { rows } = await tx.query<{ value: number }>(
+            'SELECT value FROM counters WHERE id = 1',
+          );
           await tx.query('SELECT pg_sleep(0.05)');
           await tx.query('UPDATE counters SET value = $1 WHERE id = 1', [rows[0]!.value + 1]);
         },
@@ -49,7 +65,9 @@ describe('Database transactions (real PostgreSQL)', () => {
       );
 
     await Promise.all([increment(), increment()]);
-    const { rows } = await testDb.db.query<{ value: number }>('SELECT value FROM counters WHERE id = 1');
+    const { rows } = await testDb.db.query<{ value: number }>(
+      'SELECT value FROM counters WHERE id = 1',
+    );
     expect(rows[0]!.value).toBe(2);
   });
 
@@ -60,7 +78,9 @@ describe('Database transactions (real PostgreSQL)', () => {
   });
 
   it('health probe reports connectivity and the applied schema version', async () => {
-    await expect(new PostgresHealthProbe(testDb.db).check()).resolves.toEqual({ schemaVersion: '0006' });
+    await expect(new PostgresHealthProbe(testDb.db).check()).resolves.toEqual({
+      schemaVersion: '0008',
+    });
     await expect(testDb.db.ping()).resolves.toBeUndefined();
   });
 });
@@ -107,10 +127,13 @@ describe('Seeder (real PostgreSQL)', () => {
 
   it('stores bcrypt hashes that verify against the documented demo passwords', async () => {
     for (const user of DEMO_USERS) {
-      const { rows } = await testDb.db.query<{ password_hash: string; role: string; email_verified: boolean }>(
-        'SELECT password_hash, role, email_verified FROM users WHERE lower(email) = lower($1)',
-        [user.email],
-      );
+      const { rows } = await testDb.db.query<{
+        password_hash: string;
+        role: string;
+        email_verified: boolean;
+      }>('SELECT password_hash, role, email_verified FROM users WHERE lower(email) = lower($1)', [
+        user.email,
+      ]);
       expect(rows[0]!.password_hash).toMatch(/^\$2[aby]\$/);
       expect(rows[0]!.password_hash).not.toContain(user.password);
       expect(await bcrypt.compare(user.password, rows[0]!.password_hash)).toBe(true);
@@ -146,12 +169,17 @@ describe('Seeder (real PostgreSQL)', () => {
     const event = DEMO_EVENTS[2]!;
     const shrunk = { ...event, seatsPerRow: event.seatsPerRow - 2 };
     await new Seeder(testDb.db, { bcryptRounds: 4, events: [shrunk] }).run();
-    const { rows } = await testDb.db.query<{ n: number }>('SELECT count(*)::int AS n FROM seats WHERE event_id = $1', [event.id]);
+    const { rows } = await testDb.db.query<{ n: number }>(
+      'SELECT count(*)::int AS n FROM seats WHERE event_id = $1',
+      [event.id],
+    );
     expect(rows[0]!.n).toBe(shrunk.seatRows * shrunk.seatsPerRow);
 
     const broken = { ...event, categories: [{ name: 'General', priceMinor: 1, rows: ['A'] }] };
     const before = await counts();
-    await expect(new Seeder(testDb.db, { bcryptRounds: 4, events: [broken] }).run()).rejects.toThrow('has no category for row B');
+    await expect(
+      new Seeder(testDb.db, { bcryptRounds: 4, events: [broken] }).run(),
+    ).rejects.toThrow('has no category for row B');
     expect(await counts()).toEqual(before);
   });
 });

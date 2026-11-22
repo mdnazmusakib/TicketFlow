@@ -33,6 +33,8 @@ export default async function globalSetup() {
     password: 'postgres',
     port,
     persistent: true, // directory is removed by globalTeardown (with Windows-safe retries)
+    // PG18 io_worker children can outlive the postmaster on Windows and keep Jest alive.
+    postgresFlags: ['-c', 'io_method=sync'],
     onLog: () => {},
     onError: () => {},
   });

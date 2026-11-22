@@ -13,6 +13,9 @@ const production: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   CORS_ORIGINS: 'https://ticketflow.example.com',
   JWT_SECRET: 'Zq8vN3kL0pR7tX2wY5bC9dF4gH6jK1mQzA0sD8fG3hJ',
+  EMAIL_TRANSPORT: 'smtp',
+  SMTP_HOST: 'smtp.example.com',
+  PUBLIC_API_URL: 'https://api.ticketflow.example.com',
 };
 
 function issuesOf(env: NodeJS.ProcessEnv): string[] {
@@ -73,7 +76,12 @@ describe('loadConfig', () => {
 
   it('rejects malformed values without echoing them', () => {
     const secretLookingUrl = 'mysql://root:SuperSecret@db';
-    const issues = issuesOf({ ...base, DATABASE_URL: secretLookingUrl, JWT_SECRET: 'short', PORT: '99999' });
+    const issues = issuesOf({
+      ...base,
+      DATABASE_URL: secretLookingUrl,
+      JWT_SECRET: 'short',
+      PORT: '99999',
+    });
     expect(issues.some((issue) => issue.startsWith('DATABASE_URL:'))).toBe(true);
     expect(issues.some((issue) => issue.startsWith('JWT_SECRET:'))).toBe(true);
     expect(issues.some((issue) => issue.startsWith('PORT:'))).toBe(true);
@@ -86,7 +94,11 @@ describe('loadConfig', () => {
   });
 
   it('rejects a Redis URL with the wrong scheme and invalid key prefix', () => {
-    const issues = issuesOf({ ...base, REDIS_URL: 'http://localhost', REDIS_KEY_PREFIX: 'Bad Prefix' });
+    const issues = issuesOf({
+      ...base,
+      REDIS_URL: 'http://localhost',
+      REDIS_KEY_PREFIX: 'Bad Prefix',
+    });
     expect(issues.join()).toContain('REDIS_URL');
     expect(issues.join()).toContain('REDIS_KEY_PREFIX');
   });
@@ -110,6 +122,8 @@ describe('loadConfig', () => {
       DATABASE_SSL: 'false',
       CORS_ORIGINS: 'http://insecure.example.com',
       JWT_SECRET: 'replace-with-at-least-32-random-characters-xxxxxxxx',
+      LOG_LEVEL: 'debug',
+      PUBLIC_API_URL: 'http://api.example.com',
     });
     expect(issues).toEqual(
       expect.arrayContaining([
@@ -117,11 +131,50 @@ describe('loadConfig', () => {
         'DATABASE_SSL: must be true in production',
         'CORS_ORIGINS: production origins must use https',
         'JWT_SECRET: looks like a placeholder; generate a random secret',
+        'LOG_LEVEL: debug/trace logging is not allowed in production',
+        'PUBLIC_API_URL: must be set to the public https URL of the API in production',
       ]),
     );
   });
 
   it('ConfigError message lists the issues', () => {
     expect(() => loadConfig({})).toThrow(/Invalid environment configuration:\n {2}- /);
+  });
+
+  it('derives cookie, OTP and email settings', () => {
+    const dev = loadConfig(base);
+    expect(dev.auth).toMatchObject({
+      otpTtlSeconds: 300,
+      otpMaxAttempts: 5,
+      otpResendCooldownSeconds: 60,
+      cookie: { name: 'tf_session', secure: false, sameSite: 'lax' },
+    });
+    expect(dev.email).toEqual({
+      transport: 'console',
+      from: 'TicketFlow <no-reply@ticketflow.local>',
+    });
+
+    const prod = loadConfig({ ...production, SMTP_USER: 'u', SMTP_PASS: 'p' });
+    expect(prod.auth.cookie.secure).toBe(true);
+    expect(prod.email.smtp).toEqual({
+      host: 'smtp.example.com',
+      port: 587,
+      secure: false,
+      user: 'u',
+      pass: 'p',
+    });
+  });
+
+  it('requires SMTP in production and forbids insecure cookies there', () => {
+    const issues = issuesOf({ ...production, EMAIL_TRANSPORT: 'console', COOKIE_SECURE: 'false' });
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        'EMAIL_TRANSPORT: must be smtp in production (console transport prints OTPs)',
+        'COOKIE_SECURE: must be true in production',
+      ]),
+    );
+    expect(issuesOf({ ...base, EMAIL_TRANSPORT: 'smtp' })).toContain(
+      'SMTP_HOST: is required when EMAIL_TRANSPORT=smtp',
+    );
   });
 });

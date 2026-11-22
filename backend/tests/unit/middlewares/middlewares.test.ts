@@ -53,7 +53,9 @@ describe('validate', () => {
 
   const { app } = buildApp((a) =>
     a.post('/items/:id', validate(schemas), (req, res) => {
-      const data = getValidated<{ query: { page: number }; params: { id: string }; body: unknown }>(req);
+      const data = getValidated<{ query: { page: number }; params: { id: string }; body: unknown }>(
+        req,
+      );
       res.json({ query: data.query, params: data.params, body: req.body });
     }),
   );
@@ -66,7 +68,9 @@ describe('validate', () => {
   });
 
   it('collects issues from every request part in one 400 response', async () => {
-    const response = await request(app).post('/items/not-a-uuid?page=0').send({ name: 'x', extra: true });
+    const response = await request(app)
+      .post('/items/not-a-uuid?page=0')
+      .send({ name: 'x', extra: true });
     expect(response.status).toBe(400);
     expect(response.body.success).toBe(false);
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
@@ -95,7 +99,10 @@ describe('errorHandler', () => {
       z.object({ a: z.string() }).parse({});
     });
     a.get('/pg-unique', () => {
-      throw Object.assign(new Error('duplicate key value'), { code: '23505', constraint: 'idx_active_seat_per_event' });
+      throw Object.assign(new Error('duplicate key value'), {
+        code: '23505',
+        constraint: 'idx_active_seat_per_event',
+      });
     });
     a.get('/unavailable', () => {
       throw new ServiceUnavailableError('Payment provider unavailable');
@@ -111,9 +118,16 @@ describe('errorHandler', () => {
     expect(response.status).toBe(401);
     expect(response.body).toEqual({
       success: false,
-      error: { code: 'UNAUTHORIZED', message: 'Authentication required', requestId: expect.any(String) },
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required',
+        requestId: expect.any(String),
+      },
     });
-    expect((await request(app).get('/conflict')).body.error).toMatchObject({ code: 'CONFLICT', message: 'Seat already held' });
+    expect((await request(app).get('/conflict')).body.error).toMatchObject({
+      code: 'CONFLICT',
+      message: 'Seat already held',
+    });
   });
 
   it('maps domain transition errors to 409', async () => {
@@ -154,11 +168,16 @@ describe('errorHandler', () => {
   });
 
   it('handles malformed JSON and oversized bodies', async () => {
-    const malformed = await request(app).post('/echo').set('Content-Type', 'application/json').send('{"a":');
+    const malformed = await request(app)
+      .post('/echo')
+      .set('Content-Type', 'application/json')
+      .send('{"a":');
     expect(malformed.status).toBe(400);
     expect(malformed.body.error.code).toBe('INVALID_JSON');
 
-    const large = await request(app).post('/echo').send({ data: 'x'.repeat(5_000) });
+    const large = await request(app)
+      .post('/echo')
+      .send({ data: 'x'.repeat(5_000) });
     expect(large.status).toBe(413);
     expect(large.body.error.code).toBe('PAYLOAD_TOO_LARGE');
   });
@@ -166,17 +185,23 @@ describe('errorHandler', () => {
   it('returns a JSON 404 for unknown routes', async () => {
     const response = await request(app).get('/nope');
     expect(response.status).toBe(404);
-    expect(response.body.error).toMatchObject({ code: 'NOT_FOUND', message: 'Route GET /nope not found' });
+    expect(response.body.error).toMatchObject({
+      code: 'NOT_FOUND',
+      message: 'Route GET /nope not found',
+    });
   });
 
-  it('exposes stacks only when configured (development)', async () => {
+  it('exposes stacks of unexpected errors only when configured (development)', async () => {
     const dev = buildApp((a) => {
       a.get('/boom', () => {
+        throw new Error('dev failure');
+      });
+      a.get('/missing', () => {
         throw new NotFoundError();
       });
     }, true);
-    const response = await request(dev.app).get('/boom');
-    expect(response.body.error.stack).toContain('NotFoundError');
+    expect((await request(dev.app).get('/boom')).body.error.stack).toContain('dev failure');
+    expect((await request(dev.app).get('/missing')).body.error.stack).toBeUndefined();
   });
 });
 
@@ -207,7 +232,12 @@ describe('apiResponse helpers', () => {
       a.post('/created', (_req, res) => sendSuccess(res, { id: 'x' }, 201));
     });
     expect((await request(app).get('/plain')).body).toEqual({ success: true, data: { a: 1 } });
-    expect((await request(app).get('/paged')).body.meta).toEqual({ page: 2, pageSize: 2, total: 5, totalPages: 3 });
+    expect((await request(app).get('/paged')).body.meta).toEqual({
+      page: 2,
+      pageSize: 2,
+      total: 5,
+      totalPages: 3,
+    });
     expect((await request(app).post('/created')).status).toBe(201);
     expect(buildPaginationMeta(1, 20, 0).totalPages).toBe(0);
   });

@@ -55,7 +55,9 @@ export function validate(schemas: RequestSchemas): RequestHandler {
 }
 
 /** Typed accessor for controllers: `const { body } = getValidated<typeof schema>(req)`. */
-export function getValidated<T extends ValidatedRequestData>(req: { validated?: ValidatedRequestData }): T {
+export function getValidated<T extends ValidatedRequestData>(req: {
+  validated?: ValidatedRequestData;
+}): T {
   if (!req.validated) {
     throw new Error('validate() middleware must run before getValidated()');
   }

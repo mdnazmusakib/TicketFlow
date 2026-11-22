@@ -1,4 +1,4 @@
-import { AppError, ConflictError, ValidationError } from '../../shared/errors/AppError';
+import { type AppError, ConflictError, ValidationError } from '../../shared/errors/AppError';
 
 interface PgError {
   code: string;
@@ -25,8 +25,12 @@ export function mapPgError(error: unknown): AppError | undefined {
   const constraint = error.constraint ?? 'unknown';
   switch (error.code) {
     case '23505':
-      return new ConflictError(`Duplicate value violates ${constraint}`, 'CONFLICT', { cause: error });
+      return new ConflictError(`Duplicate value violates ${constraint}`, 'CONFLICT', {
+        cause: error,
+      });
+    // foreign_key_violation; PostgreSQL 18 reports ON DELETE/UPDATE RESTRICT as restrict_violation.
     case '23503':
+    case '23001':
       return new ConflictError(`Referenced record constraint ${constraint} failed`, 'CONFLICT', {
         cause: error,
       });
@@ -35,7 +39,9 @@ export function mapPgError(error: unknown): AppError | undefined {
     case '22P02':
       return new ValidationError([{ path: constraint, message: 'Value violates a database rule' }]);
     case '23P01':
-      return new ConflictError(`Exclusion constraint ${constraint} failed`, 'CONFLICT', { cause: error });
+      return new ConflictError(`Exclusion constraint ${constraint} failed`, 'CONFLICT', {
+        cause: error,
+      });
     default:
       return undefined;
   }

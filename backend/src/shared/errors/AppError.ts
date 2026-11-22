@@ -3,12 +3,32 @@ export type ErrorCode =
   | 'BAD_REQUEST'
   | 'INVALID_JSON'
   | 'PAYLOAD_TOO_LARGE'
+  | 'UNSUPPORTED_MEDIA_TYPE'
   | 'UNAUTHORIZED'
+  | 'INVALID_CREDENTIALS'
+  | 'EMAIL_NOT_VERIFIED'
+  | 'EMAIL_TAKEN'
+  | 'OTP_INVALID'
+  | 'OTP_EXPIRED'
+  | 'OTP_ATTEMPTS_EXCEEDED'
+  | 'OTP_COOLDOWN'
+  | 'ACCOUNT_DISABLED'
   | 'FORBIDDEN'
   | 'CORS_ORIGIN_DENIED'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'INVALID_STATE_TRANSITION'
+  | 'ACTIVE_BOOKINGS_EXIST'
+  | 'SEATS_UNAVAILABLE'
+  | 'TICKET_LIMIT_EXCEEDED'
+  | 'HOLD_EXPIRED'
+  | 'EVENT_NOT_ON_SALE'
+  | 'IDEMPOTENCY_KEY_MISMATCH'
+  | 'IDEMPOTENCY_IN_PROGRESS'
+  | 'PAYMENT_IN_PROGRESS'
+  | 'PAYMENT_PROVIDER_UNAVAILABLE'
+  | 'WEBHOOK_SIGNATURE_INVALID'
+  | 'RESOURCE_IN_USE'
   | 'RATE_LIMITED'
   | 'SERVICE_UNAVAILABLE'
   | 'INTERNAL_ERROR';
@@ -64,7 +84,10 @@ export class UnauthorizedError extends AppError {
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message = 'You do not have permission to perform this action', code: 'FORBIDDEN' | 'CORS_ORIGIN_DENIED' = 'FORBIDDEN') {
+  constructor(
+    message = 'You do not have permission to perform this action',
+    code: 'FORBIDDEN' | 'CORS_ORIGIN_DENIED' = 'FORBIDDEN',
+  ) {
     super(403, code, message);
   }
 }
@@ -76,7 +99,11 @@ export class NotFoundError extends AppError {
 }
 
 export class ConflictError extends AppError {
-  constructor(message = 'Resource conflict', code: 'CONFLICT' | 'INVALID_STATE_TRANSITION' = 'CONFLICT', options?: { cause?: unknown }) {
+  constructor(
+    message = 'Resource conflict',
+    code: 'CONFLICT' | 'INVALID_STATE_TRANSITION' = 'CONFLICT',
+    options?: { cause?: unknown },
+  ) {
     super(409, code, message, undefined, options);
   }
 }

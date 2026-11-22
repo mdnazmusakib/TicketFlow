@@ -20,6 +20,11 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(config);
+  if (config.isProduction && config.uploads.driver === 'local') {
+    logger.warn(
+      'STORAGE_DRIVER=local: uploaded banners are lost on hosts with an ephemeral filesystem (use supabase or a persistent disk)',
+    );
+  }
   const container = buildContainer(config, logger);
 
   try {
@@ -30,10 +35,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const app = createApp({ config, logger, controllers: container.controllers });
+  const app = createApp({
+    config,
+    logger,
+    controllers: container.controllers,
+    authenticate: container.authenticate,
+    rateLimitStore: container.rateLimitStore,
+  });
   const server: Server = app.listen(config.port, () => {
     logger.info({ port: config.port, env: config.nodeEnv }, 'TicketFlow API listening');
   });
+  container.expiryWorker.start();
+  container.notificationWorker.start();
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
 

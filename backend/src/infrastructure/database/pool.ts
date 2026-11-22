@@ -29,7 +29,10 @@ export function createPool(config: AppConfig['database'], logger?: Logger): Pool
   return pool;
 }
 
-function buildSslOptions(config: AppConfig['database'], logger?: Logger): ConnectionOptions | false {
+function buildSslOptions(
+  config: AppConfig['database'],
+  logger?: Logger,
+): ConnectionOptions | false {
   if (!config.ssl) return false;
   if (config.sslCaPath) {
     // Full verification against the Supabase root CA.

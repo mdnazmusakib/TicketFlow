@@ -8,6 +8,8 @@ export interface TtlStore {
   get(key: string): Promise<string | null>;
   /** Atomically reads and deletes (single-use values such as OTPs). */
   take(key: string): Promise<string | null>;
+  /** Deletes the key only if it currently holds `expected`. True when deleted (single winner). */
+  compareAndDelete(key: string, expected: string): Promise<boolean>;
   delete(...keys: string[]): Promise<number>;
   /** Remaining TTL in seconds: -2 when missing, -1 when the key has no expiry. */
   ttl(key: string): Promise<number>;
@@ -29,6 +31,13 @@ if value then
   redis.call('DEL', KEYS[1])
 end
 return value
+`;
+
+const COMPARE_AND_DELETE_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
 `;
 
 const INCREMENT_SCRIPT = `
@@ -64,6 +73,10 @@ export class RedisTtlStore implements TtlStore {
   async take(key: string): Promise<string | null> {
     const result = await this.redis.eval(TAKE_SCRIPT, 1, key);
     return typeof result === 'string' ? result : null;
+  }
+
+  async compareAndDelete(key: string, expected: string): Promise<boolean> {
+    return Number(await this.redis.eval(COMPARE_AND_DELETE_SCRIPT, 1, key, expected)) === 1;
   }
 
   async delete(...keys: string[]): Promise<number> {

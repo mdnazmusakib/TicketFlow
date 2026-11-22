@@ -1,0 +1,44 @@
+name: Security review
+
+# AI security review of pull request diffs (anthropics/claude-code-security-review).
+# Requires the repository secret CLAUDE_API_KEY (an Anthropic API key). Without it the
+# job is skipped, so forks and repositories without the secret still pass.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: security-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  security-review:
+    name: Claude Code security review
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Secrets are not exposed to pull requests from forks.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check for API key
+        id: key
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          if [ -n "$CLAUDE_API_KEY" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else
+            echo "::notice::CLAUDE_API_KEY secret not set; skipping the AI security review."; fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+      - uses: anthropics/claude-code-security-review@main
+        if: steps.key.outputs.present == 'true'
+        with:
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          comment-pr: true
+          exclude-directories: node_modules,dist,coverage,.embedded-pg

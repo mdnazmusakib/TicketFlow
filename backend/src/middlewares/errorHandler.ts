@@ -23,7 +23,9 @@ interface BodyParserError {
 }
 
 function isBodyParserError(error: unknown): error is BodyParserError {
-  return typeof error === 'object' && error !== null && 'type' in error && typeof error.type === 'string';
+  return (
+    typeof error === 'object' && error !== null && 'type' in error && typeof error.type === 'string'
+  );
 }
 
 function normalize(error: unknown): AppError | undefined {
@@ -33,11 +35,15 @@ function normalize(error: unknown): AppError | undefined {
   }
   if (error instanceof ZodError) {
     return new ValidationError(
-      error.issues.map((issue) => ({ path: issue.path.map(String).join('.'), message: issue.message })),
+      error.issues.map((issue) => ({
+        path: issue.path.map(String).join('.'),
+        message: issue.message,
+      })),
     );
   }
   if (isBodyParserError(error)) {
-    if (error.type === 'entity.parse.failed') return new BadRequestError('Malformed JSON body', 'INVALID_JSON');
+    if (error.type === 'entity.parse.failed')
+      return new BadRequestError('Malformed JSON body', 'INVALID_JSON');
     if (error.type === 'entity.too.large') return new PayloadTooLargeError();
     if (error.status && error.status >= 400 && error.status < 500) return new BadRequestError();
   }
@@ -49,7 +55,10 @@ function normalize(error: unknown): AppError | undefined {
  * Unknown errors become a generic 500; internal messages and stacks are never
  * exposed outside development.
  */
-export function createErrorHandler(logger: Logger, options: { exposeStack: boolean }): ErrorRequestHandler {
+export function createErrorHandler(
+  logger: Logger,
+  options: { exposeStack: boolean },
+): ErrorRequestHandler {
   return (error: unknown, req, res, next) => {
     if (res.headersSent) {
       next(error);
@@ -58,7 +67,13 @@ export function createErrorHandler(logger: Logger, options: { exposeStack: boole
 
     const appError = normalize(error);
     const statusCode = appError?.statusCode ?? 500;
-    const logContext = { err: error, requestId: String(req.id), method: req.method, path: req.path, statusCode };
+    const logContext = {
+      err: error,
+      requestId: String(req.id),
+      method: req.method,
+      path: req.path,
+      statusCode,
+    };
 
     if (statusCode >= 500) logger.error(logContext, 'Request failed');
     else logger.warn({ ...logContext, err: undefined, code: appError?.code }, appError?.message);
@@ -67,10 +82,13 @@ export function createErrorHandler(logger: Logger, options: { exposeStack: boole
       success: false,
       error: {
         code: appError?.code ?? 'INTERNAL_ERROR',
-        message: appError && !appError.isServerError ? appError.message : 'An unexpected error occurred',
+        message:
+          appError && !appError.isServerError ? appError.message : 'An unexpected error occurred',
         ...(appError?.details ? { details: appError.details } : {}),
         requestId: String(req.id),
-        ...(options.exposeStack && error instanceof Error && error.stack ? { stack: error.stack } : {}),
+        ...(options.exposeStack && statusCode >= 500 && error instanceof Error && error.stack
+          ? { stack: error.stack }
+          : {}),
       },
     };
 

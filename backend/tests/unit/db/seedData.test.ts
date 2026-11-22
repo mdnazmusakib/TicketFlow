@@ -30,7 +30,9 @@ describe('seed data', () => {
       const rows = Array.from({ length: event.seatRows }, (_, i) => rowLabel(i));
       const assigned = event.categories.flatMap((c) => c.rows);
       expect([...assigned].sort()).toEqual([...rows].sort());
-      expect(event.categories.every((c) => Number.isInteger(c.priceMinor) && c.priceMinor >= 0)).toBe(true);
+      expect(
+        event.categories.every((c) => Number.isInteger(c.priceMinor) && c.priceMinor >= 0),
+      ).toBe(true);
       if (event.pricing.strategy === 'EARLY_BIRD') {
         expect(event.pricing.deadlineOffsetMinutes).toBeLessThan(event.startOffsetMinutes);
       }
@@ -49,7 +51,9 @@ describe('seed data', () => {
 
 describe('assertSeedAllowed', () => {
   it('blocks production unless ALLOW_SEED is set', () => {
-    expect(() => assertSeedAllowed({ isProduction: true, allowSeed: false })).toThrow('Refusing to seed');
+    expect(() => assertSeedAllowed({ isProduction: true, allowSeed: false })).toThrow(
+      'Refusing to seed',
+    );
     expect(() => assertSeedAllowed({ isProduction: true, allowSeed: true })).not.toThrow();
     expect(() => assertSeedAllowed({ isProduction: false, allowSeed: false })).not.toThrow();
   });
@@ -58,7 +62,9 @@ describe('assertSeedAllowed', () => {
 describe('migration files', () => {
   it('are sequential, uniquely versioned and checksummed', async () => {
     const files = await loadMigrationFiles();
-    expect(files.map((f) => f.version)).toEqual(files.map((_, i) => String(i + 1).padStart(4, '0')));
+    expect(files.map((f) => f.version)).toEqual(
+      files.map((_, i) => String(i + 1).padStart(4, '0')),
+    );
     expect(files.every((f) => /^[0-9a-f]{64}$/.test(f.checksum))).toBe(true);
     expect(files.every((f) => !f.sql.includes('\r\n'))).toBe(true);
   });

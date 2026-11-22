@@ -24,16 +24,21 @@ export const BOOKING_TRANSITIONS: Readonly<Record<BookingStatus, readonly Bookin
   });
 
 /** Statuses that occupy seats and count toward the per-user ticket limit. */
-export const ACTIVE_BOOKING_STATUSES: readonly BookingStatus[] = ['HELD', 'PENDING_PAYMENT', 'CONFIRMED'];
+export const ACTIVE_BOOKING_STATUSES: readonly BookingStatus[] = [
+  'HELD',
+  'PENDING_PAYMENT',
+  'CONFIRMED',
+];
 
 export const SEAT_STATES = ['HELD', 'BOOKED', 'RELEASED'] as const;
 export type SeatState = (typeof SEAT_STATES)[number];
 
-export const SEAT_STATE_TRANSITIONS: Readonly<Record<SeatState, readonly SeatState[]>> = Object.freeze({
-  HELD: ['BOOKED', 'RELEASED'],
-  BOOKED: ['RELEASED'],
-  RELEASED: [],
-});
+export const SEAT_STATE_TRANSITIONS: Readonly<Record<SeatState, readonly SeatState[]>> =
+  Object.freeze({
+    HELD: ['BOOKED', 'RELEASED'],
+    BOOKED: ['RELEASED'],
+    RELEASED: [],
+  });
 
 export class InvalidTransitionError extends Error {
   constructor(

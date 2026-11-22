@@ -1,10 +1,46 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import type { Controllers } from '../container';
+import { createAuthRouter } from './auth.routes';
+import { createBookingRouter } from './booking.routes';
+import {
+  createAdminRouter,
+  createDashboardRouter,
+  createNotificationRouter,
+} from './dashboard.routes';
+import { createOrganizerRouter, createPublicEventRouter } from './event.routes';
 import { createHealthRouter } from './health.routes';
+import { createPaymentRouter, createProviderCallbackRouter } from './payment.routes';
+
+export interface RouteGuards {
+  authenticate: RequestHandler;
+  authLimiter: RequestHandler;
+  bookingLimiter: RequestHandler;
+}
 
 /** Mounts every feature router under /api. New features register here. */
-export function createApiRouter(controllers: Controllers): Router {
+export function createApiRouter(controllers: Controllers, guards: RouteGuards): Router {
   const router = Router();
   router.use('/health', createHealthRouter(controllers.health));
+  router.use('/auth', createAuthRouter(controllers.auth, guards));
+  router.use('/events', createPublicEventRouter(controllers.publicEvents));
+  router.use('/bookings', createBookingRouter(controllers.bookings, controllers.payments, guards));
+  // Provider callbacks first: they must not hit the authenticated payments router.
+  router.use('/payments', createProviderCallbackRouter(controllers.payments));
+  router.use('/payments', createPaymentRouter(controllers.payments, guards));
+  router.use(
+    '/organizer',
+    createOrganizerRouter(
+      controllers.venues,
+      controllers.organizerEvents,
+      controllers.uploads,
+      guards.authenticate,
+    ),
+  );
+  router.use(
+    '/notifications',
+    createNotificationRouter(controllers.notifications, guards.authenticate),
+  );
+  router.use('/dashboard', createDashboardRouter(controllers.dashboards, guards.authenticate));
+  router.use('/admin', createAdminRouter(controllers.dashboards, guards.authenticate));
   return router;
 }

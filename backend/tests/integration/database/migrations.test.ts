@@ -1,7 +1,12 @@
 import { appendFile, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_MIGRATIONS_DIR, MigrationChecksumError, Migrator, loadMigrationFiles } from '../../../src/db/Migrator';
+import {
+  DEFAULT_MIGRATIONS_DIR,
+  MigrationChecksumError,
+  Migrator,
+  loadMigrationFiles,
+} from '../../../src/db/Migrator';
 import { createTestDatabase, type TestDatabase } from '../../helpers/testDatabase';
 
 const EXPECTED_TABLES = [
@@ -78,7 +83,10 @@ describe('Migrator (real PostgreSQL)', () => {
   it('serialises concurrent runners with an advisory lock', async () => {
     const fresh = await createTestDatabase();
     try {
-      const results = await Promise.all([new Migrator(fresh.pool).migrate(), new Migrator(fresh.pool).migrate()]);
+      const results = await Promise.all([
+        new Migrator(fresh.pool).migrate(),
+        new Migrator(fresh.pool).migrate(),
+      ]);
       const total = results[0].length + results[1].length;
       expect(total).toBe((await loadMigrationFiles()).length);
     } finally {
@@ -91,7 +99,9 @@ describe('Migrator (real PostgreSQL)', () => {
     try {
       await cp(DEFAULT_MIGRATIONS_DIR, dir, { recursive: true });
       await appendFile(join(dir, '0001_extensions_and_functions.sql'), '\n-- edited\n');
-      await expect(new Migrator(testDb.pool, { dir }).migrate()).rejects.toBeInstanceOf(MigrationChecksumError);
+      await expect(new Migrator(testDb.pool, { dir }).migrate()).rejects.toBeInstanceOf(
+        MigrationChecksumError,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -101,9 +111,17 @@ describe('Migrator (real PostgreSQL)', () => {
     const fresh = await createTestDatabase();
     const dir = await mkdtemp(join(tmpdir(), 'tf-migrations-'));
     try {
-      await cp(join(DEFAULT_MIGRATIONS_DIR, '0001_extensions_and_functions.sql'), join(dir, '0001_extensions_and_functions.sql'));
-      await writeFile(join(dir, '0002_broken.sql'), 'CREATE TABLE ok_table (id int);\nSELECT * FROM missing_table;\n');
-      await expect(new Migrator(fresh.pool, { dir }).migrate()).rejects.toThrow('Migration 0002_broken.sql failed');
+      await cp(
+        join(DEFAULT_MIGRATIONS_DIR, '0001_extensions_and_functions.sql'),
+        join(dir, '0001_extensions_and_functions.sql'),
+      );
+      await writeFile(
+        join(dir, '0002_broken.sql'),
+        'CREATE TABLE ok_table (id int);\nSELECT * FROM missing_table;\n',
+      );
+      await expect(new Migrator(fresh.pool, { dir }).migrate()).rejects.toThrow(
+        'Migration 0002_broken.sql failed',
+      );
 
       const status = await new Migrator(fresh.pool, { dir }).status();
       expect(status.applied.map((m) => m.version)).toEqual(['0001']);

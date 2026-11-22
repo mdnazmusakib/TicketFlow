@@ -20,7 +20,9 @@ function adminUrl(): string {
  * Creates an isolated, uniquely named database on the test server so test
  * files can run in parallel without sharing state. Optionally migrates it.
  */
-export async function createTestDatabase(options: { migrate?: boolean } = {}): Promise<TestDatabase> {
+export async function createTestDatabase(
+  options: { migrate?: boolean } = {},
+): Promise<TestDatabase> {
   const name = `tf_test_${randomBytes(6).toString('hex')}`;
   const admin = new Pool({ connectionString: adminUrl(), max: 1 });
   await admin.query(`CREATE DATABASE ${name}`);
