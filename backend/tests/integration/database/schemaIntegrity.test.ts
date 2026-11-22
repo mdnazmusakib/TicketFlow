@@ -298,13 +298,22 @@ describe('schema integrity (real PostgreSQL)', () => {
   });
 
   describe('payments and refunds', () => {
+    /** Payments are always created INITIATED (trigger), then moved to the wanted status. */
     async function insertPayment(bookingId: string, key: string, status = 'INITIATED') {
-      return testDb.pool.query<{ id: string }>(
-        `INSERT INTO payments (booking_id, provider, amount_minor, currency, status, idempotency_key, paid_at)
-         VALUES ($1, 'MOCK_PROVIDER_A', 100000, 'BDT', $2, $3, CASE WHEN $2::varchar = 'SUCCEEDED' THEN now() END)
-         RETURNING id`,
-        [bookingId, status, key],
+      const ref = `TF${key.replace(/[^A-Za-z0-9]/g, '').slice(-24)}`.padEnd(10, '0');
+      const created = await testDb.pool.query<{ id: string }>(
+        `INSERT INTO payments (booking_id, provider, transaction_ref, amount_minor, currency, idempotency_key)
+         VALUES ($1, 'MOCK_PROVIDER_A', $2, 100000, 'BDT', $3) RETURNING id`,
+        [bookingId, ref, key],
       );
+      if (status !== 'INITIATED') {
+        await testDb.pool.query(
+          `UPDATE payments SET status = $2::varchar,
+             paid_at = CASE WHEN $2::varchar = 'SUCCEEDED' THEN now() END WHERE id = $1`,
+          [created.rows[0]!.id, status],
+        );
+      }
+      return created;
     }
 
     it('allows only one successful payment per booking (no double charge)', async () => {
@@ -326,16 +335,20 @@ describe('schema integrity (real PostgreSQL)', () => {
     it('allows at most one live refund per payment', async () => {
       const bookingId = await insertBooking(testDb.pool, fx.eventId, customerId);
       const payment = await insertPayment(bookingId, `r-${bookingId}`, 'SUCCEEDED');
-      const refund = (key: string, status: string) =>
+      const refund = (key: string, status: string, attempt: number) =>
         testDb.pool.query(
-          `INSERT INTO refunds (booking_id, payment_id, amount_minor, currency, status, idempotency_key, processed_at)
-           VALUES ($1, $2, 100000, 'BDT', $3::varchar, $4, CASE WHEN $3::varchar IN ('SUCCEEDED','FAILED') THEN now() END)`,
-          [bookingId, payment.rows[0]!.id, status, key],
+          `INSERT INTO refunds (booking_id, payment_id, amount_minor, currency, status, idempotency_key, attempt, processed_at)
+           VALUES ($1, $2, 100000, 'BDT', $3::varchar, $4, $5, CASE WHEN $3::varchar IN ('SUCCEEDED','FAILED') THEN now() END)`,
+          [bookingId, payment.rows[0]!.id, status, key, attempt],
         );
-      await refund(`rf-${bookingId}-1`, 'FAILED');
-      await refund(`rf-${bookingId}-2`, 'PENDING');
-      expect((await pgFailure(refund(`rf-${bookingId}-3`, 'PENDING'))).constraint).toBe(
+      await refund(`rf-${bookingId}-1`, 'FAILED', 1);
+      await refund(`rf-${bookingId}-2`, 'PENDING', 2);
+      expect((await pgFailure(refund(`rf-${bookingId}-3`, 'PENDING', 3))).constraint).toBe(
         'uq_refunds_one_active_per_payment',
+      );
+      // Attempt numbers are unique per payment.
+      expect((await pgFailure(refund(`rf-${bookingId}-4`, 'FAILED', 2))).constraint).toBe(
+        'uq_refunds_payment_attempt',
       );
     });
 

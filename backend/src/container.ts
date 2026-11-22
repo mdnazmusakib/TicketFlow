@@ -10,12 +10,17 @@ import {
   VenueController,
 } from './controllers/EventController';
 import { HealthController } from './controllers/HealthController';
+import { PaymentController } from './controllers/PaymentController';
 import type { EmailSender } from './domain/notifications/email';
+import { PaymentGatewayRegistry, type PaymentGateway } from './domain/payments/PaymentGateway';
 import { PricingStrategyRegistry } from './domain/pricing/PricingStrategy';
 import { Database } from './infrastructure/database/Database';
 import { createPool } from './infrastructure/database/pool';
 import { ConsoleEmailSender } from './infrastructure/email/ConsoleEmailSender';
 import { SmtpEmailSender } from './infrastructure/email/SmtpEmailSender';
+import { MockPaymentLedger } from './infrastructure/payments/MockPaymentLedger';
+import { MockProviderA, MockProviderB } from './infrastructure/payments/MockProviders';
+import { SslCommerzAdapter } from './infrastructure/payments/SslCommerzAdapter';
 import { createRedisClient } from './infrastructure/redis/client';
 import { RedisLockManager, type LockManager } from './infrastructure/redis/LockManager';
 import { RedisTtlStore, type TtlStore } from './infrastructure/redis/TtlStore';
@@ -24,6 +29,8 @@ import { createAuthenticate } from './middlewares/auth';
 import { BookingRepository } from './repositories/BookingRepository';
 import { EventRepository } from './repositories/EventRepository';
 import { PostgresHealthProbe, RedisHealthProbe } from './repositories/HealthProbes';
+import { IdempotencyRepository } from './repositories/IdempotencyRepository';
+import { PaymentRepository } from './repositories/PaymentRepository';
 import { SeatMapRepository } from './repositories/SeatMapRepository';
 import { UserRepository } from './repositories/UserRepository';
 import { VenueRepository } from './repositories/VenueRepository';
@@ -38,6 +45,12 @@ import { EventDiscoveryService } from './services/events/EventDiscoveryService';
 import { EventService } from './services/events/EventService';
 import { VenueService } from './services/events/VenueService';
 import { HealthService } from './services/HealthService';
+import { CancellationService } from './services/payments/CancellationService';
+import { IdempotencyService } from './services/payments/IdempotencyService';
+import { MockCheckoutService } from './services/payments/MockCheckoutService';
+import { PaymentService, toPaymentDto } from './services/payments/PaymentService';
+import { RefundService, toRefundDto } from './services/payments/RefundService';
+import { WebhookService } from './services/payments/WebhookService';
 import { APP_VERSION } from './version';
 import { BookingExpiryWorker } from './workers/BookingExpiryWorker';
 
@@ -48,6 +61,7 @@ export interface Controllers {
   organizerEvents: OrganizerEventController;
   publicEvents: PublicEventController;
   bookings: BookingController;
+  payments: PaymentController;
 }
 
 export interface Infrastructure {
@@ -61,7 +75,15 @@ export interface Container {
   infrastructure: Infrastructure;
   controllers: Controllers;
   authenticate: RequestHandler;
-  services: { bookings: BookingService; bookingExpiry: BookingExpiryService };
+  services: {
+    bookings: BookingService;
+    bookingExpiry: BookingExpiryService;
+    payments: PaymentService;
+    refunds: RefundService;
+    cancellations: CancellationService;
+    webhooks: WebhookService;
+  };
+  gateways: PaymentGatewayRegistry;
   expiryWorker: BookingExpiryWorker;
   /** Connects to Redis and verifies PostgreSQL. Fails fast on startup. */
   start(): Promise<void>;
@@ -75,6 +97,10 @@ export interface ContainerOverrides {
   redis?: Redis;
   emailSender?: EmailSender;
   otpBypass?: boolean;
+  /** Clock for business rules (24-hour refund window, pricing). */
+  now?: () => Date;
+  /** Replaces/extends the configured payment gateways (e.g. SSLCommerz with a fake HTTP client). */
+  paymentGateways?: PaymentGateway[];
 }
 
 function createEmailSender(config: AppConfig): EmailSender {
@@ -143,6 +169,35 @@ export function buildContainer(
   });
   const discoveryService = new EventDiscoveryService(events, seatMaps);
 
+  // Payment gateways (adapters); booking code only sees the PaymentGateway interface.
+  const mockLedger = new MockPaymentLedger(ttlStore);
+  const mockProviderA = config.payments.mockEnabled
+    ? new MockProviderA(mockLedger, {
+        checkoutUrl: `${config.urls.frontend}/payments/mock-checkout`,
+        webhookSecret: config.payments.mockWebhookSecret,
+      })
+    : null;
+  const gateways = new PaymentGatewayRegistry();
+  if (mockProviderA) {
+    gateways.register(mockProviderA);
+    gateways.register(
+      new MockProviderB(mockLedger, { webhookSecret: config.payments.mockWebhookSecret }),
+    );
+  }
+  if (config.payments.sslcommerz) {
+    gateways.register(
+      new SslCommerzAdapter({
+        storeId: config.payments.sslcommerz.storeId,
+        storePassword: config.payments.sslcommerz.storePassword,
+        sandbox: config.payments.sslcommerz.sandbox,
+        publicApiUrl: config.urls.publicApi,
+        defaultCustomerPhone: config.payments.sslcommerz.customerPhone,
+      }),
+    );
+  }
+  for (const gateway of overrides.paymentGateways ?? []) gateways.register(gateway);
+  const paymentRepository = new PaymentRepository(db);
+
   // Booking
   const bookingRepository = new BookingRepository(db);
   const lifecycle = new BookingLifecycle(bookingRepository);
@@ -169,12 +224,67 @@ export function buildContainer(
       maxTicketsPerUserPerEvent: config.booking.maxTicketsPerUserPerEvent,
       holdTtlSeconds: config.booking.seatHoldTtlSeconds,
       logger,
+      ...(overrides.now ? { now: overrides.now } : {}),
+      financials: async (bookingId) => ({
+        payments: (await paymentRepository.listForBooking(bookingId)).map((p) => ({
+          ...toPaymentDto(p),
+        })),
+        refunds: (await paymentRepository.refundsForBooking(bookingId)).map((r) => ({
+          ...toRefundDto(r),
+        })),
+      }),
     },
   );
-  const expiryWorker = new BookingExpiryWorker(bookingExpiry, {
-    intervalMs: config.booking.expiryIntervalMs,
+
+  // Payments, refunds, cancellation
+  const refundService = new RefundService(db, paymentRepository, gateways, {
+    maxAttempts: config.payments.refundMaxAttempts,
     logger,
   });
+  const paymentService = new PaymentService(
+    db,
+    paymentRepository,
+    bookingRepository,
+    bookingService,
+    lifecycle,
+    users,
+    gateways,
+    new IdempotencyService(new IdempotencyRepository(db)),
+    refundService,
+    seatLocks,
+    {
+      holdExtensionSeconds: config.payments.holdExtensionSeconds,
+      logger,
+      mockProviderBTokens: MockProviderB.TOKENS,
+    },
+  );
+  const webhookService = new WebhookService(gateways, paymentRepository, paymentService, logger);
+  const cancellationService = new CancellationService(
+    db,
+    bookingRepository,
+    paymentRepository,
+    bookingService,
+    lifecycle,
+    paymentService,
+    refundService,
+    { logger, ...(overrides.now ? { now: overrides.now } : {}) },
+  );
+
+  const expiryWorker = new BookingExpiryWorker(
+    {
+      // Resolve payments first so a completed payment confirms instead of expiring.
+      expireDue: async () => {
+        await paymentService.reconcileOpen();
+        const expired = await bookingExpiry.expireDue();
+        await refundService.processDue();
+        return expired;
+      },
+    },
+    {
+      intervalMs: config.booking.expiryIntervalMs,
+      logger,
+    },
+  );
 
   let closed = false;
 
@@ -187,9 +297,23 @@ export function buildContainer(
       venues: new VenueController(venueService),
       organizerEvents: new OrganizerEventController(eventService),
       publicEvents: new PublicEventController(discoveryService),
-      bookings: new BookingController(bookingService),
+      bookings: new BookingController(bookingService, cancellationService),
+      payments: new PaymentController(
+        paymentService,
+        webhookService,
+        new MockCheckoutService(mockProviderA, paymentService, webhookService),
+        { frontendUrl: config.urls.frontend },
+      ),
     },
-    services: { bookings: bookingService, bookingExpiry },
+    services: {
+      bookings: bookingService,
+      bookingExpiry,
+      payments: paymentService,
+      refunds: refundService,
+      cancellations: cancellationService,
+      webhooks: webhookService,
+    },
+    gateways,
     expiryWorker,
     async start() {
       if (redis.status === 'wait') await redis.connect();

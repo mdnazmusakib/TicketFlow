@@ -4,6 +4,7 @@ import { createAuthRouter } from './auth.routes';
 import { createBookingRouter } from './booking.routes';
 import { createOrganizerRouter, createPublicEventRouter } from './event.routes';
 import { createHealthRouter } from './health.routes';
+import { createPaymentRouter, createProviderCallbackRouter } from './payment.routes';
 
 export interface RouteGuards {
   authenticate: RequestHandler;
@@ -17,7 +18,10 @@ export function createApiRouter(controllers: Controllers, guards: RouteGuards): 
   router.use('/health', createHealthRouter(controllers.health));
   router.use('/auth', createAuthRouter(controllers.auth, guards));
   router.use('/events', createPublicEventRouter(controllers.publicEvents));
-  router.use('/bookings', createBookingRouter(controllers.bookings, guards));
+  router.use('/bookings', createBookingRouter(controllers.bookings, controllers.payments, guards));
+  // Provider callbacks first: they must not hit the authenticated payments router.
+  router.use('/payments', createProviderCallbackRouter(controllers.payments));
+  router.use('/payments', createPaymentRouter(controllers.payments, guards));
   router.use(
     '/organizer',
     createOrganizerRouter(controllers.venues, controllers.organizerEvents, guards.authenticate),

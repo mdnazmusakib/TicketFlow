@@ -159,14 +159,19 @@ describe('Booking API (real PostgreSQL)', () => {
       expect(confirmed.confirmedAt).toEqual(expect.any(String));
       expect(await seatStates(h, id)).toEqual(['BOOKED']);
       expect(await h.redis.exists(RedisKeys.seatHold(eventId, seatIds[3]!))).toBe(0);
-      expect((await agent.post(`/api/bookings/${id}/cancel`)).status).toBe(409);
-
       const taken = await (
         await newCustomer(h)
       ).agent
         .post('/api/bookings')
         .send({ eventId, seatIds: [seatIds[3]] });
       expect(taken.body.error.code).toBe('SEATS_UNAVAILABLE');
+
+      // Confirmed bookings can now be cancelled (refund rules apply; nothing was paid here).
+      const cancelled = await agent.post(`/api/bookings/${id}/cancel`).expect(200);
+      expect(cancelled.body.data).toMatchObject({
+        status: 'CANCELLED',
+        refundDecision: { refundable: false },
+      });
     });
 
     it('re-verifies the hold before confirming: an expired hold is never confirmed', async () => {

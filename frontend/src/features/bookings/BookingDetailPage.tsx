@@ -1,8 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { Button } from '../../components/ui/Button';
 import { ErrorMessage } from '../../components/ui/Feedback';
-import { FormAlert } from '../../components/ui/Form';
 import { Spinner } from '../../components/ui/Spinner';
 import { ApiError, toErrorMessage } from '../../lib/apiClient';
 import { formatDateTime, formatMoney } from '../../lib/format';
@@ -13,6 +11,9 @@ import {
   type Booking,
   type BookingsApi,
 } from './bookingsApi';
+import { CancelBooking } from '../payments/CancelBooking';
+import { PaymentPanel } from '../payments/PaymentPanel';
+import { RefundStatus } from '../payments/RefundStatus';
 import { Countdown } from './Countdown';
 
 const STATUS_TONE: Record<Booking['status'], string> = {
@@ -28,19 +29,19 @@ export function BookingStatusBadge({ status }: { status: Booking['status'] }) {
 }
 
 /** Booking status, countdown while held, actions and full status history. */
-export function BookingDetailPage({ api = defaultApi }: { api?: BookingsApi }) {
+export function BookingDetailPage({
+  api = defaultApi,
+  redirect,
+}: {
+  api?: BookingsApi;
+  redirect?: (url: string) => void;
+}) {
   const { id = '' } = useParams();
   const [booking, setBooking] = useState<Booking | null>(null);
   const loaded = useAsync(
     useCallback(async (signal: AbortSignal) => setBooking(await api.get(id, signal)), [api, id]),
     id,
   );
-  const [message, setMessage] = useState<{
-    tone: 'error' | 'success' | 'info';
-    text: string;
-  } | null>(null);
-  const [busy, setBusy] = useState(false);
-
   if (loaded.status === 'loading' && !booking) return <Spinner label="Loading booking" />;
   if (loaded.status === 'error') {
     if (loaded.error instanceof ApiError && loaded.error.status === 404) {
@@ -56,33 +57,6 @@ export function BookingDetailPage({ api = defaultApi }: { api?: BookingsApi }) {
     return <ErrorMessage message={toErrorMessage(loaded.error)} onRetry={loaded.reload} />;
   }
   if (!booking) return null;
-
-  async function act(action: 'checkout' | 'cancel') {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const updated = action === 'checkout' ? await api.checkout(id) : await api.cancel(id);
-      setBooking(updated);
-      setMessage(
-        action === 'checkout'
-          ? {
-              tone: 'info',
-              text: 'Seats reserved for payment. Online payment opens in the next release.',
-            }
-          : { tone: 'success', text: 'Booking cancelled and seats released.' },
-      );
-    } catch (error) {
-      setMessage({ tone: 'error', text: toErrorMessage(error) });
-      if (
-        error instanceof ApiError &&
-        (error.code === 'HOLD_EXPIRED' || error.code === 'INVALID_STATE_TRANSITION')
-      ) {
-        loaded.refresh();
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const active = booking.status === 'HELD' || booking.status === 'PENDING_PAYMENT';
 
@@ -110,8 +84,6 @@ export function BookingDetailPage({ api = defaultApi }: { api?: BookingsApi }) {
             <Link to={`/events/${booking.eventId}`}>Choose seats again</Link>
           </p>
         )}
-        <FormAlert message={message?.text} tone={message?.tone} />
-
         <table className="table">
           <thead>
             <tr>
@@ -139,19 +111,21 @@ export function BookingDetailPage({ api = defaultApi }: { api?: BookingsApi }) {
           )}
         </p>
 
-        <div className="form-actions">
-          {booking.status === 'HELD' && (
-            <Button onClick={() => act('checkout')} disabled={busy}>
-              Continue to payment
-            </Button>
-          )}
-          {active && (
-            <Button variant="ghost" onClick={() => act('cancel')} disabled={busy}>
-              Cancel booking
-            </Button>
-          )}
-        </div>
+        {booking.status === 'CONFIRMED' && (
+          <p className="alert alert--success">Payment received. Your tickets are confirmed.</p>
+        )}
+        <CancelBooking booking={booking} onBookingChange={setBooking} api={api} />
       </section>
+
+      {active && (
+        <PaymentPanel
+          booking={booking}
+          onBookingChange={setBooking}
+          api={api}
+          {...(redirect ? { redirect } : {})}
+        />
+      )}
+      <RefundStatus booking={booking} onBookingChange={setBooking} api={api} />
 
       <section className="card">
         <h2>History</h2>

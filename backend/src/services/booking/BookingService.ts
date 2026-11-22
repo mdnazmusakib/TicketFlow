@@ -23,12 +23,21 @@ import type { BookingExpiryService, ExpiredBooking } from './BookingExpiryServic
 import type { BookingLifecycle } from './BookingLifecycle';
 import type { SeatLockCoordinator } from './SeatLockCoordinator';
 
+/** Payment and refund summaries attached to booking views (provided by the payments module). */
+export interface BookingFinancials {
+  payments: Record<string, unknown>[];
+  refunds: Record<string, unknown>[];
+}
+
 export interface BookingServiceOptions {
   maxTicketsPerUserPerEvent: number;
   holdTtlSeconds: number;
   logger?: Logger;
   now?: () => Date;
+  financials?: (bookingId: string) => Promise<BookingFinancials>;
 }
+
+export type ConfirmOutcome = 'CONFIRMED' | 'ALREADY_CONFIRMED' | 'EXPIRED' | 'NOT_CONFIRMABLE';
 
 export interface HoldInput {
   eventId: string;
@@ -38,7 +47,11 @@ export interface HoldInput {
 
 const iso = (date: Date | null) => (date ? date.toISOString() : null);
 
-export function toBookingDto(view: BookingView, now: Date = new Date()) {
+export function toBookingDto(
+  view: BookingView,
+  now: Date = new Date(),
+  financials: BookingFinancials = { payments: [], refunds: [] },
+) {
   return {
     id: view.id,
     status: view.status,
@@ -74,6 +87,8 @@ export function toBookingDto(view: BookingView, now: Date = new Date()) {
     cancelledAt: iso(view.cancelledAt),
     expiredAt: iso(view.expiredAt),
     createdAt: view.createdAt.toISOString(),
+    payments: financials.payments,
+    refunds: financials.refunds,
     /** Lets clients correct their clock when rendering the countdown. */
     serverTime: now.toISOString(),
   };
@@ -269,35 +284,6 @@ export class BookingService {
     return this.view(bookingId);
   }
 
-  /** HELD / PENDING_PAYMENT -> CANCELLED; seats are released immediately. */
-  async cancel(actor: Actor, bookingId: string, reason?: string): Promise<BookingDto> {
-    await this.db.withTransaction(async (tx) => {
-      const booking = await this.lockOwned(tx, actor, bookingId);
-      if (booking.status === 'CONFIRMED') {
-        throw new AppError(
-          409,
-          'INVALID_STATE_TRANSITION',
-          'Confirmed bookings are cancelled through the refund flow',
-        );
-      }
-      if (booking.status !== 'HELD' && booking.status !== 'PENDING_PAYMENT') {
-        throw new AppError(
-          409,
-          'INVALID_STATE_TRANSITION',
-          `Booking is already ${booking.status.toLowerCase()}`,
-        );
-      }
-      if (await this.expireIfDue(tx, booking)) return;
-      await this.lifecycle.transition(tx, booking, 'CANCELLED', {
-        reason: 'cancelled by customer',
-        actorId: actor.id,
-        cancellationReason: reason ?? 'Cancelled by customer before payment',
-      });
-    });
-    await this.releaseLocksOf(bookingId);
-    return this.view(bookingId);
-  }
-
   /**
    * PENDING_PAYMENT -> CONFIRMED with pre-commit re-verification (ALGORITHMS §1.2).
    * Internal: invoked by the payment flow once a payment is verified server-side.
@@ -309,31 +295,42 @@ export class BookingService {
     const outcome = await this.db.withTransaction(async (tx) => {
       const booking = await this.bookings.findForUpdate(tx, bookingId);
       if (!booking) throw new NotFoundError('Booking not found');
-      if (booking.status !== 'PENDING_PAYMENT') {
-        throw new AppError(
-          409,
-          'INVALID_STATE_TRANSITION',
-          `Cannot confirm a ${booking.status.toLowerCase()} booking`,
-        );
-      }
-      if (await this.expireIfDue(tx, booking)) return 'EXPIRED' as const;
-      await this.lifecycle.transition(tx, booking, 'CONFIRMED', {
-        reason: context.reason,
-        actorId: context.actorId ?? null,
-      });
-      return 'OK' as const;
+      return this.confirmWithin(tx, booking, context);
     });
     await this.releaseLocksOf(bookingId);
-    if (outcome === 'EXPIRED')
+    if (outcome === 'EXPIRED') {
       throw new AppError(409, 'HOLD_EXPIRED', 'The seat hold expired before confirmation');
+    }
+    if (outcome === 'NOT_CONFIRMABLE') {
+      throw new AppError(409, 'INVALID_STATE_TRANSITION', 'This booking cannot be confirmed');
+    }
     return this.view(bookingId);
+  }
+
+  /**
+   * Confirms inside the caller's transaction (booking row already locked).
+   * Re-verifies state and hold expiry first; never confirms an expired hold.
+   */
+  async confirmWithin(
+    tx: Queryable,
+    booking: BookingCore,
+    context: { reason: string; actorId?: string | null },
+  ): Promise<ConfirmOutcome> {
+    if (booking.status === 'CONFIRMED') return 'ALREADY_CONFIRMED';
+    if (booking.status !== 'PENDING_PAYMENT') return 'NOT_CONFIRMABLE';
+    if (await this.expireIfDue(tx, booking)) return 'EXPIRED';
+    await this.lifecycle.transition(tx, booking, 'CONFIRMED', {
+      reason: context.reason,
+      actorId: context.actorId ?? null,
+    });
+    return 'CONFIRMED';
   }
 
   async get(actor: Actor, bookingId: string): Promise<BookingDto> {
     const view = await this.bookings.getView(this.db, bookingId);
     if (!view || (actor.role !== 'ADMIN' && view.customerId !== actor.id))
       throw new NotFoundError('Booking not found');
-    return toBookingDto(view, this.now());
+    return toBookingDto(view, this.now(), await this.financials(view.id));
   }
 
   async list(actor: Actor, filter: { status?: BookingStatus; page: number; pageSize: number }) {
@@ -404,7 +401,7 @@ export class BookingService {
   }
 
   /** Locks the booking and enforces ownership (other customers' bookings answer 404). */
-  private async lockOwned(tx: Queryable, actor: Actor, bookingId: string): Promise<BookingCore> {
+  async lockOwned(tx: Queryable, actor: Actor, bookingId: string): Promise<BookingCore> {
     const booking = await this.bookings.findForUpdate(tx, bookingId);
     if (!booking || (actor.role !== 'ADMIN' && booking.customerId !== actor.id)) {
       throw new NotFoundError('Booking not found');
@@ -413,7 +410,7 @@ export class BookingService {
   }
 
   /** Expires a pre-confirmation booking whose hold ran out (DB clock). Returns true if it did. */
-  private async expireIfDue(tx: Queryable, booking: BookingCore): Promise<boolean> {
+  async expireIfDue(tx: Queryable, booking: BookingCore): Promise<boolean> {
     const { rows } = await tx.query<{ due: boolean }>('SELECT $1::timestamptz <= now() AS due', [
       booking.holdExpiresAt,
     ]);
@@ -425,7 +422,7 @@ export class BookingService {
     return true;
   }
 
-  private async releaseLocksOf(bookingId: string): Promise<void> {
+  async releaseLocksOf(bookingId: string): Promise<void> {
     const booking = await this.bookings.findCore(this.db, bookingId);
     if (!booking) return;
     const seatIds = await this.bookings.seatIdsOf(this.db, bookingId);
@@ -442,9 +439,15 @@ export class BookingService {
     );
   }
 
-  private async view(bookingId: string): Promise<BookingDto> {
+  private async financials(bookingId: string): Promise<BookingFinancials> {
+    return this.options.financials
+      ? this.options.financials(bookingId)
+      : { payments: [], refunds: [] };
+  }
+
+  async view(bookingId: string): Promise<BookingDto> {
     const view = await this.bookings.getView(this.db, bookingId);
     if (!view) throw new NotFoundError('Booking not found');
-    return toBookingDto(view, this.now());
+    return toBookingDto(view, this.now(), await this.financials(view.id));
   }
 }

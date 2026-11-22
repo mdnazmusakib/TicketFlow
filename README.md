@@ -2,7 +2,7 @@
 
 Event ticket booking platform: organizers publish events with seat maps and pricing strategies, customers hold seats (5-minute holds, max 6 tickets per event), pay through pluggable gateways and get email + in-app notifications.
 
-> **Status: Phase 3 complete.** Foundation, authentication/authorization, event management, discovery, plus server-side pricing (base and early-bird strategies), 5-minute seat holds with Redis coordination and PostgreSQL as the authority, the 6-ticket limit, the booking lifecycle with history, and a background expiry worker. Payments and notifications arrive in later phases.
+> **Status: Phase 4 complete.** Phases 1–3 plus payments through a provider-agnostic gateway (Mock Provider A, Mock Provider B, SSLCommerz), idempotent payment initiation, verified webhooks/IPN, booking confirmation only after server-side verification, customer cancellation with the 24-hour refund rule, and retried refunds. Notifications arrive in a later phase.
 
 ## Demo credentials
 
@@ -100,6 +100,15 @@ npm run dev:frontend                         # http://localhost:5173 (proxies /a
 | `EMAIL_TRANSPORT` | no (console) | `console` prints emails (incl. OTPs) to the backend terminal; `smtp` is required in production |
 | `BOOKING_EXPIRY_INTERVAL_MS` | no (15000) | How often expired holds are released |
 | `BOOKING_RATE_LIMIT_MAX` | no (60) | Hold/checkout/cancel requests per window per IP |
+| `FRONTEND_URL` | no (first CORS origin) | Web app URL used for payment return pages |
+| `PUBLIC_API_URL` | no (`http://localhost:PORT`) | Public API URL given to SSLCommerz for IPN and browser returns |
+| `PAYMENT_HOLD_EXTENSION_SECONDS` | no (900) | Seats stay held this long once payment starts |
+| `REFUND_MAX_ATTEMPTS` | no (5) | Refund attempts before giving up |
+| `ENABLE_MOCK_PAYMENTS` | no (true outside production) | Mock Provider A and B |
+| `MOCK_PAYMENT_WEBHOOK_SECRET` | production with mocks | HMAC secret for mock webhooks (derived automatically in development) |
+| `SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWORD` | for SSLCommerz | Sandbox or live store credentials (never committed) |
+| `SSLCOMMERZ_SANDBOX` | no (true) | `false` switches to securepay.sslcommerz.com |
+| `SSLCOMMERZ_CUSTOMER_PHONE` | no | Phone sent to SSLCommerz (required field; not collected from users) |
 | `EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` | for smtp | Mail server settings |
 
 The server validates every variable at startup and exits listing invalid names (never values).
@@ -135,7 +144,15 @@ The server validates every variable at startup and exits listing invalid names (
 | POST | `/api/bookings/quote` | `{ eventId, seatIds }` → server-side price (strategy, discounts, total) |
 | POST | `/api/bookings` | Customer hold for 5 minutes; optional `Idempotency-Key` header; 409 `SEATS_UNAVAILABLE` / `TICKET_LIMIT_EXCEEDED` |
 | GET | `/api/bookings` · `/api/bookings/:id` | My bookings (status filter, pages) / booking with seats and status history |
-| POST | `/api/bookings/:id/checkout` · `/api/bookings/:id/cancel` | HELD → PENDING_PAYMENT / HELD or PENDING_PAYMENT → CANCELLED |
+| POST | `/api/bookings/:id/payments` | `{ provider, paymentMethodToken? }` + **required** `Idempotency-Key` header → payment attempt (redirect URL, status) |
+| GET · POST | `/api/payments/:id` · `/api/payments/:id/cancel` | Status (re-verifies open attempts) / abandon an open attempt |
+| GET | `/api/payments/providers` | Enabled providers and Mock B test tokens |
+| GET · POST | `/api/payments/mock/:transactionRef` · `/api/payments/mock/complete` | Mock Provider A hosted page data / complete it (the provider then sends a signed webhook) |
+| POST | `/api/payments/webhooks/:provider` | Provider webhooks / SSLCommerz IPN (signature-verified, deduplicated) |
+| POST | `/api/payments/providers/sslcommerz/return/:result` | SSLCommerz browser return → server-side validation → redirect to the result page |
+| GET · POST | `/api/bookings/:id/cancellation` · `/api/bookings/:id/cancel` | Refund preview / cancel (HELD, PENDING_PAYMENT, CONFIRMED with the 24 h rule) |
+| POST | `/api/bookings/:id/refunds/retry` | Retry a failed refund |
+| POST | `/api/bookings/:id/checkout` | HELD → PENDING_PAYMENT without starting a payment |
 | * | `/api/organizer/venues[/:id]` | Venue CRUD (ORGANIZER own / ADMIN all) |
 | * | `/api/organizer/events[/:id]` | Event CRUD, `PUT …/seat-map`, `PATCH …/categories/:categoryId`, `PATCH …/seats/category`, `POST …/publish|unpublish|cancel` |
 
@@ -148,6 +165,15 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 - **Live** (`backend/tests/live`): read-only checks against your Supabase and Redis (migrated schema, RLS/privilege lockdown, demo data, real transaction rolled back, Redis locks/TTL).
 - **Frontend** (`frontend/tests`): API client, auth flows (login, register, OTP, protected routes, open-redirect guard), events list/details, organizer venues/events/seat map editor, error boundaries.
 - **Auth & authorization coverage** (`backend/tests/integration/api`): OTP hashing, expiry, attempt limit, replay, resend cooldown, bypass mode, cookie flags, forged/`alg:none`/revoked tokens, RBAC (401/403), IDOR on venues and events (404), destructive-change guards with active bookings, public discovery filters and data exposure.
+
+## Testing payments on localhost
+
+1. Hold seats as a customer (see below), then pick a payment method on the booking page:
+   - **Mock Provider A**: opens a simulated hosted card page with **Pay now** / **Decline payment**. The provider then sends an HMAC-signed webhook that the API verifies before confirming.
+   - **Mock Provider B**: pick a test card: `tok_success`, `tok_decline`, `tok_pending` (settles on the next check), `tok_timeout` (charged but the response is lost: the page shows "pending" and confirms after verification, never charging twice), `tok_refund_fail_once` (first refund fails, a retry succeeds).
+   - **SSLCommerz**: needs `SSLCOMMERZ_STORE_ID` / `SSLCOMMERZ_STORE_PASSWORD` (free sandbox account at developer.sslcommerz.com). For the IPN to reach your laptop, expose the API with a tunnel and set `PUBLIC_API_URL`; without the IPN, the browser return and the status page still validate server-side.
+2. **Cancel** a confirmed booking: the dialog shows the refund decision first. Events more than 24 hours away get a full refund; within 24 hours, none. "Classical Evening (starts soon)" shows the no-refund case (re-run `npm run db:seed` to move it 3 hours ahead again).
+3. Refund status appears on the booking page; failed refunds can be retried and are also retried automatically.
 
 ## Testing seat booking on localhost
 

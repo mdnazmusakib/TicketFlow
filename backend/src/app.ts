@@ -41,9 +41,30 @@ export function createApp({ config, logger, controllers, authenticate }: AppDepe
       hsts: config.isProduction ? { maxAge: 31_536_000, includeSubDomains: true } : false,
     }),
   );
-  app.use(cors(buildCorsOptions(config.corsOrigins)));
+  // Payment providers post server-to-server (webhooks/IPN) or redirect the browser with a
+  // form POST from their domain; those routes carry no session and are authenticated by
+  // signatures + server-side verification instead, so the browser CORS allowlist is skipped.
+  const corsMiddleware = cors(buildCorsOptions(config.corsOrigins));
+  app.use((req, res, next) => {
+    if (
+      req.path.startsWith('/api/payments/webhooks/') ||
+      req.path.startsWith('/api/payments/providers/')
+    ) {
+      next();
+      return;
+    }
+    corsMiddleware(req, res, next);
+  });
   // JSON only: HTML forms (urlencoded) are not accepted, which removes a classic CSRF vector.
-  app.use(express.json({ limit: '100kb' }));
+  app.use(
+    express.json({
+      limit: '100kb',
+      // Raw bytes are kept for webhook signature verification.
+      verify: (req, _res, buffer) => {
+        (req as unknown as { rawBody?: Buffer }).rawBody = buffer;
+      },
+    }),
+  );
   app.use(cookieParser());
 
   const authLimiter = createRateLimiter({

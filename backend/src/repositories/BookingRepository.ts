@@ -304,6 +304,24 @@ export class BookingRepository {
     return rows[0]?.active ?? true;
   }
 
+  /** Keeps seats reserved while the customer pays: expiry becomes at least now + seconds. */
+  async extendHold(tx: Queryable, id: string, seconds: number): Promise<Date> {
+    const { rows } = await tx.query<{ hold_expires_at: Date }>(
+      `UPDATE bookings SET hold_expires_at = GREATEST(hold_expires_at, now() + make_interval(secs => $2))
+       WHERE id = $1 RETURNING hold_expires_at`,
+      [id, seconds],
+    );
+    return rows[0]!.hold_expires_at;
+  }
+
+  async findEventStart(db: Queryable, bookingId: string): Promise<Date | null> {
+    const { rows } = await db.query<{ start_at: Date }>(
+      'SELECT e.start_at FROM bookings b JOIN events e ON e.id = b.event_id WHERE b.id = $1',
+      [bookingId],
+    );
+    return rows[0]?.start_at ?? null;
+  }
+
   async findCore(db: Queryable, id: string): Promise<BookingCore | null> {
     const { rows } = await db.query<CoreRow>(
       `SELECT ${CORE_COLUMNS} FROM bookings b WHERE b.id = $1`,

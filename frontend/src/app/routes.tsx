@@ -4,6 +4,8 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { AccountPage } from '../features/account/AccountPage';
 import { BookingDetailPage } from '../features/bookings/BookingDetailPage';
 import { MyBookingsPage } from '../features/bookings/MyBookingsPage';
+import { MockCheckoutPage } from '../features/payments/MockCheckoutPage';
+import { PaymentResultPage } from '../features/payments/PaymentResultPage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { ProtectedRoute } from '../features/auth/ProtectedRoute';
 import { RegisterPage } from '../features/auth/RegisterPage';
@@ -36,6 +38,8 @@ export const routes: RouteObject[] = [
           { path: 'account', element: <AccountPage /> },
           { path: 'bookings', element: <MyBookingsPage /> },
           { path: 'bookings/:id', element: <BookingDetailPage /> },
+          { path: 'payments/mock-checkout', element: <MockCheckoutPage /> },
+          { path: 'payments/:id/result', element: <PaymentResultPage /> },
         ],
       },
       {

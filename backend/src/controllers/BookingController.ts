@@ -10,6 +10,7 @@ import {
 } from '../schemas/booking.schemas';
 import type { idParamsSchema } from '../schemas/event.schemas';
 import type { BookingService } from '../services/booking/BookingService';
+import type { CancellationService } from '../services/payments/CancellationService';
 import { ValidationError } from '../shared/errors/AppError';
 import { sendSuccess } from '../shared/http/apiResponse';
 
@@ -17,7 +18,10 @@ type IdParams = z.output<typeof idParamsSchema>;
 
 /** HTTP adapter for bookings; all rules live in BookingService. */
 export class BookingController {
-  constructor(private readonly bookings: BookingService) {}
+  constructor(
+    private readonly bookings: BookingService,
+    private readonly cancellations: CancellationService,
+  ) {}
 
   quote = async (req: Request, res: Response) => {
     const body = req.body as z.output<typeof seatSelectionSchema>;
@@ -66,6 +70,22 @@ export class BookingController {
       params: IdParams;
       body: z.output<typeof cancelBookingSchema>;
     }>(req);
-    sendSuccess(res, await this.bookings.cancel(getAuth(req).actor, params.id, body.reason));
+    const { booking, refund } = await this.cancellations.cancel(
+      getAuth(req).actor,
+      params.id,
+      body.reason,
+    );
+    sendSuccess(res, { ...booking, refundDecision: refund });
+  };
+
+  cancellationPreview = async (req: Request, res: Response) => {
+    const { params } = getValidated<{ params: IdParams }>(req);
+    res.setHeader('Cache-Control', 'no-store');
+    sendSuccess(res, await this.cancellations.preview(getAuth(req).actor, params.id));
+  };
+
+  retryRefund = async (req: Request, res: Response) => {
+    const { params } = getValidated<{ params: IdParams }>(req);
+    sendSuccess(res, await this.cancellations.retryRefund(getAuth(req).actor, params.id));
   };
 }

@@ -76,6 +76,20 @@ export class SeatLockCoordinator {
     });
   }
 
+  /** Extends the locks a booking owns (e.g. while the customer is paying). */
+  async extendForBooking(
+    eventId: string,
+    seatIds: string[],
+    bookingId: string,
+    until: Date,
+  ): Promise<void> {
+    if (seatIds.length === 0) return;
+    await this.extendToHold(
+      { keys: this.keys(eventId, seatIds), token: bookingId, ttlMs: this.options.acquireTtlMs },
+      until,
+    );
+  }
+
   private async reclaimStale(keys: string[]): Promise<boolean> {
     let reclaimed = false;
     for (const key of keys) {

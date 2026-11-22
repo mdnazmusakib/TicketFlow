@@ -8,6 +8,7 @@ import { buildContainer, type Container } from '../../src/container';
 import { createRedisClient } from '../../src/infrastructure/redis/client';
 import { RedisTtlStore } from '../../src/infrastructure/redis/TtlStore';
 import type { EmailMessage, EmailSender } from '../../src/domain/notifications/email';
+import type { PaymentGateway } from '../../src/domain/payments/PaymentGateway';
 import { captureLogger, testConfig } from './testApp';
 import { createTestDatabase, type TestDatabase } from './testDatabase';
 
@@ -33,6 +34,7 @@ export interface ApiHarness {
   redis: Redis;
   emails: InMemoryEmailSender;
   container: Container;
+  config: ReturnType<typeof testConfig>;
   keyPrefix: string;
   /** True when backed by a real Redis server (TEST_REDIS_URL). */
   realRedis: boolean;
@@ -43,7 +45,13 @@ let redisDb = 0;
 
 /** Full app on a fresh migrated PostgreSQL database + an isolated in-memory Redis. */
 export async function createApiHarness(
-  options: { otpBypass?: boolean; env?: Record<string, string>; redisUrl?: string } = {},
+  options: {
+    otpBypass?: boolean;
+    env?: Record<string, string>;
+    redisUrl?: string;
+    now?: () => Date;
+    paymentGateways?: PaymentGateway[];
+  } = {},
 ): Promise<ApiHarness> {
   const testDb = await createTestDatabase({ migrate: true });
   // Distinct keyPrefix keeps ioredis-mock instances (which share data) isolated per harness.
@@ -66,6 +74,8 @@ export async function createApiHarness(
     redis,
     emailSender: emails,
     otpBypass: options.otpBypass ?? false,
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.paymentGateways ? { paymentGateways: options.paymentGateways } : {}),
   });
   const app = createApp({
     config,
@@ -79,6 +89,7 @@ export async function createApiHarness(
     redis,
     emails,
     container,
+    config,
     keyPrefix: config.redis.keyPrefix,
     realRedis,
     async close() {

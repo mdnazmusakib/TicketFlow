@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 const booleanString = z
@@ -92,8 +93,31 @@ const envSchema = z
     RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(300),
 
     ALLOW_SEED: booleanString.default(false),
+
+    /** Browser-facing URL of the web app (payment return pages). Defaults to the first CORS origin. */
+    FRONTEND_URL: urlWithProtocols(['http:', 'https:']).optional(),
+    /** Public URL of this API, used by providers for IPN/return callbacks. */
+    PUBLIC_API_URL: urlWithProtocols(['http:', 'https:']).optional(),
+    PAYMENT_HOLD_EXTENSION_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+    REFUND_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+    ENABLE_MOCK_PAYMENTS: booleanString.optional(),
+    MOCK_PAYMENT_WEBHOOK_SECRET: z.string().min(32, 'must be at least 32 characters').optional(),
+    SSLCOMMERZ_STORE_ID: z.string().min(1).optional(),
+    SSLCOMMERZ_STORE_PASSWORD: z.string().min(1).optional(),
+    SSLCOMMERZ_SANDBOX: booleanString.default(true),
+    SSLCOMMERZ_CUSTOMER_PHONE: z
+      .string()
+      .regex(/^\+?\d{6,15}$/)
+      .default('01700000000'),
   })
   .superRefine((env, ctx) => {
+    if (Boolean(env.SSLCOMMERZ_STORE_ID) !== Boolean(env.SSLCOMMERZ_STORE_PASSWORD)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SSLCOMMERZ_STORE_PASSWORD'],
+        message: 'SSLCOMMERZ_STORE_ID and SSLCOMMERZ_STORE_PASSWORD must be set together',
+      });
+    }
     if (env.EMAIL_TRANSPORT === 'smtp' && !env.SMTP_HOST) {
       ctx.addIssue({
         code: 'custom',
@@ -107,6 +131,13 @@ const envSchema = z
         code: 'custom',
         path: ['EMAIL_TRANSPORT'],
         message: 'must be smtp in production (console transport prints OTPs)',
+      });
+    }
+    if (env.ENABLE_MOCK_PAYMENTS && !env.MOCK_PAYMENT_WEBHOOK_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MOCK_PAYMENT_WEBHOOK_SECRET'],
+        message: 'is required when mock payments are enabled in production',
       });
     }
     if (env.COOKIE_SECURE === false) {
@@ -200,6 +231,19 @@ export interface AppConfig {
     max: number;
   };
   allowSeed: boolean;
+  urls: { frontend: string; publicApi: string };
+  payments: {
+    holdExtensionSeconds: number;
+    refundMaxAttempts: number;
+    mockEnabled: boolean;
+    mockWebhookSecret: string;
+    sslcommerz?: {
+      storeId: string;
+      storePassword: string;
+      sandbox: boolean;
+      customerPhone: string;
+    };
+  };
 }
 
 export class ConfigError extends Error {
@@ -294,5 +338,28 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       max: env.RATE_LIMIT_MAX,
     },
     allowSeed: env.ALLOW_SEED,
+    urls: {
+      frontend: (env.FRONTEND_URL ?? env.CORS_ORIGINS[0]!).replace(/\/$/, ''),
+      publicApi: (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`).replace(/\/$/, ''),
+    },
+    payments: {
+      holdExtensionSeconds: env.PAYMENT_HOLD_EXTENSION_SECONDS,
+      refundMaxAttempts: env.REFUND_MAX_ATTEMPTS,
+      mockEnabled: env.ENABLE_MOCK_PAYMENTS ?? env.NODE_ENV !== 'production',
+      // Outside production a stable secret is derived so local setups work without extra config.
+      mockWebhookSecret:
+        env.MOCK_PAYMENT_WEBHOOK_SECRET ??
+        createHash('sha256').update(`mock-webhook:${env.JWT_SECRET}`).digest('hex'),
+      ...(env.SSLCOMMERZ_STORE_ID && env.SSLCOMMERZ_STORE_PASSWORD
+        ? {
+            sslcommerz: {
+              storeId: env.SSLCOMMERZ_STORE_ID,
+              storePassword: env.SSLCOMMERZ_STORE_PASSWORD,
+              sandbox: env.SSLCOMMERZ_SANDBOX,
+              customerPhone: env.SSLCOMMERZ_CUSTOMER_PHONE,
+            },
+          }
+        : {}),
+    },
   });
 }

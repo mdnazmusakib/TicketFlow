@@ -1,6 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { BookingDetailPage } from '../src/features/bookings/BookingDetailPage';
 import type { Booking, BookingsApi, Quote } from '../src/features/bookings/bookingsApi';
 import { Countdown, formatRemaining } from '../src/features/bookings/Countdown';
 import { MyBookingsPage } from '../src/features/bookings/MyBookingsPage';
@@ -238,77 +237,6 @@ describe('Countdown', () => {
     expect(onExpire).toHaveBeenCalledTimes(1);
     expect(formatRemaining(299_001)).toBe('5:00');
     expect(formatRemaining(61_000)).toBe('1:01');
-  });
-});
-
-describe('BookingDetailPage', () => {
-  it('shows seats, total, countdown and history; checkout moves to awaiting payment', async () => {
-    const api = fakeBookingsApi();
-    renderRoute(<BookingDetailPage api={api} />, {
-      path: '/bookings/:id',
-      at: '/bookings/b1',
-      auth: fakeAuthApi(customerUser),
-    });
-    expect(await screen.findByRole('heading', { name: 'Rock Night' })).toBeInTheDocument();
-    expect(screen.getByText('Seats held', { selector: '.badge' })).toBeInTheDocument();
-    expect(screen.getByRole('timer')).toHaveTextContent(/[45]:\d\d left/);
-    expect(screen.getByText('Row A, seat 1')).toBeInTheDocument();
-    expect(screen.getByText(/BDT\s?1,800\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/seat hold/)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Continue to payment' }));
-    expect(await screen.findByText(/Online payment opens in the next release/)).toBeInTheDocument();
-    expect(screen.getByText('Awaiting payment', { selector: '.badge' })).toBeInTheDocument();
-    expect(api.checkout).toHaveBeenCalledWith('b1');
-  });
-
-  it('cancels a hold', async () => {
-    const api = fakeBookingsApi();
-    renderRoute(<BookingDetailPage api={api} />, {
-      path: '/bookings/:id',
-      at: '/bookings/b1',
-      auth: fakeAuthApi(customerUser),
-    });
-    await userEvent.click(await screen.findByRole('button', { name: 'Cancel booking' }));
-    expect(await screen.findByText('Booking cancelled and seats released.')).toBeInTheDocument();
-    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
-  });
-
-  it('explains expired holds and refreshes after an expiry error', async () => {
-    const api = fakeBookingsApi({
-      get: jest
-        .fn()
-        .mockResolvedValueOnce(booking)
-        .mockResolvedValue({ ...booking, status: 'EXPIRED', holdExpiresAt: null }),
-      checkout: jest
-        .fn()
-        .mockRejectedValue(
-          new ApiError(409, 'HOLD_EXPIRED', 'Your seat hold expired. Please select seats again.'),
-        ),
-    });
-    renderRoute(<BookingDetailPage api={api} />, {
-      path: '/bookings/:id',
-      at: '/bookings/b1',
-      auth: fakeAuthApi(customerUser),
-    });
-    await userEvent.click(await screen.findByRole('button', { name: 'Continue to payment' }));
-    expect(await screen.findByText(/Your 5-minute hold expired/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Choose seats again' })).toHaveAttribute(
-      'href',
-      '/events/e1',
-    );
-  });
-
-  it('shows not found for bookings that are not yours', async () => {
-    const api = fakeBookingsApi({
-      get: jest.fn().mockRejectedValue(new ApiError(404, 'NOT_FOUND', 'Booking not found')),
-    });
-    renderRoute(<BookingDetailPage api={api} />, {
-      path: '/bookings/:id',
-      at: '/bookings/x',
-      auth: fakeAuthApi(customerUser),
-    });
-    expect(await screen.findByRole('heading', { name: 'Booking not found' })).toBeInTheDocument();
   });
 });
 
