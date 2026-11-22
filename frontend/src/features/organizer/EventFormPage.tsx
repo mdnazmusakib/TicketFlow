@@ -9,6 +9,7 @@ import { fromLocalInput, toLocalInput } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import { organizerApi as defaultApi, type OrganizerApi } from '../events/eventsApi';
 import type { EventDetailsInput, ManagedEventDetails, Venue } from '../events/types';
+import { BannerUpload } from './BannerUpload';
 import {
   buildSeatMap,
   DEFAULT_SEAT_MAP_DRAFT,
@@ -27,7 +28,6 @@ interface DetailsDraft {
   discountPct: string;
   salesStartAt: string;
   salesEndAt: string;
-  bannerUrl: string;
 }
 
 const EMPTY: DetailsDraft = {
@@ -41,7 +41,6 @@ const EMPTY: DetailsDraft = {
   discountPct: '10',
   salesStartAt: '',
   salesEndAt: '',
-  bannerUrl: '',
 };
 
 function fromEvent(event: ManagedEventDetails): DetailsDraft {
@@ -56,7 +55,6 @@ function fromEvent(event: ManagedEventDetails): DetailsDraft {
     discountPct: String(event.pricing.earlyBirdDiscountPct ?? 10),
     salesStartAt: toLocalInput(event.salesStartAt),
     salesEndAt: toLocalInput(event.salesEndAt),
-    bannerUrl: event.bannerUrl ?? '',
   };
 }
 
@@ -77,7 +75,6 @@ function toPayload(draft: DetailsDraft): EventDetailsInput {
         : { strategy: 'BASE' },
     salesStartAt: fromLocalInput(draft.salesStartAt),
     salesEndAt: fromLocalInput(draft.salesEndAt),
-    bannerUrl: draft.bannerUrl.trim() || null,
   };
 }
 
@@ -119,7 +116,16 @@ export function EventFormPage({ api = defaultApi }: { api?: OrganizerApi }) {
   const initial: DetailsDraft = event
     ? fromEvent(event)
     : { ...EMPTY, venueId: venues[0]?.id ?? '' };
-  return <EventForm key={id ?? 'new'} id={id} api={api} venues={venues} initial={initial} />;
+  return (
+    <EventForm
+      key={id ?? 'new'}
+      id={id}
+      api={api}
+      venues={venues}
+      initial={initial}
+      bannerUrl={event?.bannerUrl ?? null}
+    />
+  );
 }
 
 interface EventFormProps {
@@ -127,10 +133,11 @@ interface EventFormProps {
   api: OrganizerApi;
   venues: Venue[];
   initial: DetailsDraft;
+  bannerUrl: string | null;
 }
 
 /** The form itself; mounted once data is loaded so initial state comes straight from props. */
-function EventForm({ id, api, venues, initial }: EventFormProps) {
+function EventForm({ id, api, venues, initial, bannerUrl }: EventFormProps) {
   const isEdit = Boolean(id);
   const navigate = useNavigate();
   const [draft, setDraft] = useState<DetailsDraft>(initial);
@@ -263,13 +270,11 @@ function EventForm({ id, api, venues, initial }: EventFormProps) {
             </div>
           )}
         </fieldset>
-        <TextField
-          label="Banner image URL (https, optional)"
-          type="url"
-          value={draft.bannerUrl}
-          onChange={set('bannerUrl')}
-          error={errors.bannerUrl}
-        />
+        {isEdit && id ? (
+          <BannerUpload eventId={id} api={api} initialUrl={bannerUrl} />
+        ) : (
+          <p className="field__hint">You can upload a banner image after creating the event.</p>
+        )}
 
         {!isEdit && <SeatMapBuilder draft={seatMap} onChange={setSeatMap} />}
 

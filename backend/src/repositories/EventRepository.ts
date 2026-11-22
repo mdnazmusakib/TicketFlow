@@ -238,6 +238,10 @@ export class EventRepository {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async setBannerUrl(id: string, bannerUrl: string | null, db: Queryable = this.db): Promise<void> {
+    await db.query('UPDATE events SET banner_url = $2 WHERE id = $1', [id, bannerUrl]);
+  }
+
   async findWithStats(id: string): Promise<EventWithStats | null> {
     const { rows } = await this.db.query<EventRow & StatsRow>(
       `SELECT e.*, v.name AS v_name, v.address AS v_address, v.city AS v_city,

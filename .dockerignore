@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+backend/.embedded-pg
+backend/.tmp
+backend/uploads
+playwright-report
+test-results
+.git
+.github
+.claude
+*.log

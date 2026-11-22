@@ -1,0 +1,60 @@
+# Render Blueprint (optional): one Docker web service. Secrets are set in the Render
+# dashboard (sync: false) and never committed. See README "Deployment".
+services:
+  - type: web
+    name: ticketflow
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health/ready
+    # Deploys are triggered by CI (deploy hook) only after all checks pass on main.
+    autoDeploy: false
+    # Apply pending migrations before each new version starts serving traffic.
+    preDeployCommand: node dist/db/cli/migrate.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: '1'
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: 'true'
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: PUBLIC_API_URL
+        sync: false
+      - key: EMAIL_TRANSPORT
+        value: smtp
+      - key: EMAIL_FROM
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: ENABLE_MOCK_PAYMENTS
+        value: 'false'
+      - key: SSLCOMMERZ_STORE_ID
+        sync: false
+      - key: SSLCOMMERZ_STORE_PASSWORD
+        sync: false
+      - key: SSLCOMMERZ_SANDBOX
+        value: 'true'
+      - key: SSLCOMMERZ_CUSTOMER_PHONE
+        sync: false
+    # Persistent disk for uploaded banners (local storage); without it uploads are lost on redeploy.
+    disk:
+      name: uploads
+      mountPath: /app/backend/uploads
+      sizeGB: 1

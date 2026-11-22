@@ -38,6 +38,16 @@ module.exports = {
       setupFilesAfterEnv: ['<rootDir>/tests/helpers/integrationTimeout.ts'],
     },
     {
+      // Real SSLCommerz sandbox (credentials from backend/.env) + embedded PostgreSQL.
+      // Run with: npm run test:sandbox
+      ...common,
+      displayName: 'sandbox',
+      testMatch: ['<rootDir>/tests/sandbox/**/*.test.ts'],
+      globalSetup: '<rootDir>/tests/helpers/globalSetup.mjs',
+      globalTeardown: '<rootDir>/tests/helpers/globalTeardown.mjs',
+      setupFilesAfterEnv: ['<rootDir>/tests/helpers/integrationTimeout.ts'],
+    },
+    {
       // Real Supabase + Redis from backend/.env. Run with: npm run test:live
       ...common,
       displayName: 'live',

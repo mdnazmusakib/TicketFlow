@@ -44,3 +44,9 @@ Build **TicketFlow**, an event ticket booking platform (similar to Ticketmaster 
 - **Testing**: Unit & integration tests via **Jest** (with coverage report in CI) + E2E tests via **Playwright CLI**.
 - **CI/CD**: On push/PR: lint + build + unit/integration tests + coverage + `anthropics/claude-code-security-review`; on merge to `main`: automatic deployment of frontend and backend.
 - **Hosting & Docs**: Live frontend, backend, and database; complete `README.md`, `ARCHITECTURE.md`, `AI_USAGE.md`, `PRD.md`, `TRD.md`, `DATABASE_DESIGN.md`, and `ALGORITHMS_AND_SECURITY.md`.
+## 5. Implementation Notes (Phase 6)
+- **Admin**: an `ADMIN` role (seeded demo admin, never self-registered) has read-only platform oversight (`/admin`: totals, failed refunds, open payments, notification delivery, user directory) and can manage any organizer's events and venues.
+- **Dashboards**: customers get a dashboard (bookings, payments, refunds, notifications); organizers get sales, occupancy and per-event booking overviews (customer emails masked).
+- **File uploads**: implemented for event banner images (JPEG/PNG/WebP, ≤ 2 MB, content-verified, random file names).
+- **Reminders**: sent when the event starts between 1 hour and `REMINDER_WINDOW_MINUTES` (default 2 hours) from now, so they always arrive at least 1 hour before the start, exactly once.
+- **Deployment**: single Docker service (API + web app on one origin) on Render, Supabase PostgreSQL, managed Redis; GitHub Actions deploys `main` through a deploy hook after all checks pass. Live hosting is configured by the repository owner (see `COMPLIANCE_MATRIX.md`).

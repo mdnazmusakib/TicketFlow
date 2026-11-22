@@ -118,7 +118,8 @@ export interface EventDetailsInput {
   pricing: PricingInput;
   salesStartAt: string | null;
   salesEndAt: string | null;
-  bannerUrl: string | null;
+  /** Optional external https banner; uploads use the banner endpoint instead. */
+  bannerUrl?: string | null;
 }
 
 export interface VenueInput {

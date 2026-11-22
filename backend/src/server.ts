@@ -35,6 +35,7 @@ async function main(): Promise<void> {
     logger,
     controllers: container.controllers,
     authenticate: container.authenticate,
+    rateLimitStore: container.rateLimitStore,
   });
   const server: Server = app.listen(config.port, () => {
     logger.info({ port: config.port, env: config.nodeEnv }, 'TicketFlow API listening');

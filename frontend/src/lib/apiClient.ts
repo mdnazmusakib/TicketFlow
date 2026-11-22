@@ -74,14 +74,21 @@ export class ApiClient {
     options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
 
     const headers: Record<string, string> = { Accept: 'application/json', ...options.headers };
-    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    // FormData sets its own multipart boundary header.
+    if (options.body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
 
     let response: Response;
     try {
       response = await this.fetchImpl(url, {
         method: options.method ?? 'GET',
         headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        body:
+          options.body === undefined
+            ? undefined
+            : isForm
+              ? (options.body as FormData)
+              : JSON.stringify(options.body),
         credentials: 'include',
         signal: controller.signal,
       });

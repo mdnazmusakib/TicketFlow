@@ -6,6 +6,7 @@
  *
  * Usage: npm run test:live          (project "live")
  *        npm run test:concurrency   (project "concurrency": embedded PostgreSQL + real Redis)
+ *        npm run test:sandbox       (project "sandbox": real SSLCommerz sandbox + embedded PostgreSQL)
  */
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
@@ -25,7 +26,7 @@ const env = {
   TEST_REDIS_URL: process.env.REDIS_URL,
 };
 
-const project = process.argv[2] === 'concurrency' ? 'concurrency' : 'live';
+const project = ['concurrency', 'sandbox'].includes(process.argv[2]) ? process.argv[2] : 'live';
 const result = spawnSync(
   process.execPath,
   [require.resolve('jest/bin/jest'), '--selectProjects', project, '--runInBand'],

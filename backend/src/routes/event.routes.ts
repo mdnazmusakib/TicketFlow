@@ -4,7 +4,9 @@ import type {
   PublicEventController,
   VenueController,
 } from '../controllers/EventController';
+import type { UploadController } from '../controllers/UploadController';
 import { requireRole } from '../middlewares/auth';
+import { imageUpload } from '../middlewares/upload';
 import { validate } from '../middlewares/validate';
 import {
   assignSeatsSchema,
@@ -36,6 +38,7 @@ export function createPublicEventRouter(controller: PublicEventController): Rout
 export function createOrganizerRouter(
   venues: VenueController,
   events: OrganizerEventController,
+  uploads: UploadController,
   authenticate: RequestHandler,
 ): Router {
   const router = Router();
@@ -78,5 +81,8 @@ export function createOrganizerRouter(
   router.post('/events/:id/publish', byId, events.publish);
   router.post('/events/:id/unpublish', byId, events.unpublish);
   router.post('/events/:id/cancel', byId, events.cancel);
+  // Banner image: JPEG/PNG/WebP, ≤ 2 MB, content-verified, random file name.
+  router.post('/events/:id/banner', byId, imageUpload('image'), uploads.setBanner);
+  router.delete('/events/:id/banner', byId, uploads.removeBanner);
   return router;
 }

@@ -1,8 +1,20 @@
 # TicketFlow
 
-Event ticket booking platform: organizers publish events with seat maps and pricing strategies, customers hold seats (5-minute holds, max 6 tickets per event), pay through pluggable gateways and get email + in-app notifications.
+Event ticket booking platform (in the spirit of Ticketmaster / BookMyShow). Organizers publish events with seat maps and pricing strategies; customers find events, hold seats for 5 minutes (max 6 tickets per event), pay through pluggable payment gateways, get email + in-app notifications, and cancel under a clear 24-hour refund rule.
 
-> **Status: Phase 5 complete.** Phases 1–4 (auth, events, seat holds, payments through Mock Provider A/B and SSLCommerz, cancellation and refunds) plus Email + In-App notifications through a transactional outbox (booking confirmation, cancellation, reminder at least 1 hour before the event), the in-app inbox, and customer, organizer and admin dashboards.
+> **Status: all six phases implemented.** See [COMPLIANCE_MATRIX.md](COMPLIANCE_MATRIX.md) for what is complete, partial or not yet verified (live hosting is set up by the repository owner).
+
+## Features
+
+- **Accounts**: registration with 6-digit email OTP (hashed, 5-minute TTL, attempt limit, resend cooldown; bypassed only in automated tests), bcrypt passwords, httpOnly cookie JWT with server-side revocation, roles `CUSTOMER`, `ORGANIZER`, `ADMIN`.
+- **Organizers**: venues, events (draft → published → cancelled), seat maps (rows × seats) with categories and prices, banner images, pricing strategy per event (**Base price** or **Early bird**), sales/booking dashboard per event.
+- **Discovery**: search by name/venue, city, date range, sorting and pagination; live seat availability.
+- **Booking**: 5-minute seat holds (Redis locks + PostgreSQL partial unique index, zero double booking), 6-ticket limit per user per event, strict lifecycle `HELD → PENDING_PAYMENT → CONFIRMED | EXPIRED | CANCELLED` with full history, automatic expiry.
+- **Payments**: one `PaymentGateway` interface with Mock Provider A (hosted page + signed webhook), Mock Provider B (tokens) and **SSLCommerz**; idempotent (no double charge on retry), server-side verification before confirmation, reconciliation of unknown outcomes.
+- **Cancellation & refunds**: full refund when cancelled more than 24 hours before the start, otherwise none; refunds retried with backoff.
+- **Notifications**: Email + In-App on confirmation and cancellation, and a reminder at least 1 hour before the event; transactional outbox with retries, no duplicates.
+- **Dashboards**: customer (bookings, payments, refunds, notifications), organizer (revenue, occupancy, bookings by status), admin (platform totals, notification delivery, user directory).
+- **Security**: Zod validation, RBAC + ownership checks (IDOR-safe 404s), Redis-backed rate limits, strict CORS, Helmet/CSP, redacted logs, production config guards. Details: [ALGORITHMS_AND_SECURITY.md](ALGORITHMS_AND_SECURITY.md).
 
 ## Demo credentials
 
@@ -23,70 +35,83 @@ Seeded catalogue: 2 venues (Dhaka, Chattogram) and 4 events, 220 seats in total:
 
 | Layer | Choice |
 | --- | --- |
-| Backend | Node.js (≥ 22) · TypeScript strict · Express 5 · Zod · Pino · Helmet |
-| Database | Supabase PostgreSQL via `pg` (real transactions on one connection) |
-| Cache / locks | Redis via `ioredis` (atomic Lua lock scripts, TTL store) |
-| Frontend | React 19 · Vite · TypeScript · React Router |
-| Tests | Jest (+ Supertest, embedded PostgreSQL) · Playwright CLI for E2E (later phase) |
-| Quality | ESLint (flat config, layer import rules) · Prettier |
+| Backend | Node.js (≥ 22; CI on 24, developed on 26) · TypeScript strict · Express 5 · Zod 4 · Pino · Helmet · Multer |
+| Database | Supabase PostgreSQL 17 via `pg` (transactions, partial unique indexes, triggers, RLS lockdown) |
+| Cache / locks | Redis via `ioredis` (atomic Lua seat locks, OTP/TTL store, rate-limit counters) |
+| Frontend | React 19 · Vite 8 · TypeScript · React Router |
+| Payments | Mock Provider A/B, SSLCommerz (sandbox verified) |
+| Tests | Jest + Supertest (embedded PostgreSQL), Testing Library, Playwright |
+| CI/CD | GitHub Actions (quality, tests, coverage, Playwright, Claude Code security review, deploy hook) · Docker · Render |
+
+Architecture, layers, patterns and data flows: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Repository layout
 
 ```text
 TicketFlow/
 ├── backend/
-│   ├── db/migrations/          # versioned SQL (source of truth, matches DATABASE_DESIGN.md)
-│   ├── scripts/                # run-live-tests.js
+│   ├── db/migrations/       # versioned SQL 0001–0008 (matches DATABASE_DESIGN.md)
+│   ├── scripts/             # live/sandbox test runner, schema consistency report
 │   ├── src/
-│   │   ├── config/             # env validation, logger (redaction), CORS
-│   │   ├── middlewares/        # requestId, request logging, validate (zod), rate limit, errors
-│   │   ├── controllers/        # HTTP only
-│   │   ├── services/           # orchestration / business logic
-│   │   ├── domain/lifecycle/   # booking + seat state machines
-│   │   ├── repositories/       # data access (health probes so far)
-│   │   ├── infrastructure/     # Database (transactions), Redis client, LockManager, TtlStore
-│   │   ├── db/                 # Migrator, Seeder, CLIs
-│   │   ├── routes/             # Express routers (/api)
-│   │   ├── shared/             # AppError hierarchy, API response helpers
-│   │   ├── app.ts              # createApp(deps) – no I/O
-│   │   ├── container.ts        # composition root (DI)
-│   │   └── server.ts           # startup, graceful shutdown
-│   └── tests/{unit,integration,live,helpers}
-├── frontend/
-│   ├── src/{app,components,features,lib,pages,styles,config}
-│   └── tests/
-├── DATABASE_DESIGN.md · PRD.md · TRD.md · ALGORITHMS_AND_SECURITY.md
-└── .claude/CLAUDE.md           # engineering rules
+│   │   ├── config/          # env validation (+ production rules), logger (redaction), CORS
+│   │   ├── middlewares/     # auth/RBAC, validate (zod), rate limit, upload, SPA, errors
+│   │   ├── controllers/     # HTTP only
+│   │   ├── services/        # auth, events, booking, payments, notifications, dashboards
+│   │   ├── domain/          # pricing, payments, notifications, lifecycle, uploads (pure rules)
+│   │   ├── repositories/    # SQL / Redis data access
+│   │   ├── infrastructure/  # Database, Redis locks/TTL/rate limits, payment adapters, email, storage
+│   │   ├── workers/         # hold expiry, notification/reminder worker
+│   │   ├── db/              # Migrator, Seeder, CLIs
+│   │   ├── routes/          # Express routers
+│   │   ├── app.ts           # createApp(deps), no I/O
+│   │   ├── container.ts     # composition root (DI)
+│   │   └── server.ts        # startup, workers, graceful shutdown
+│   └── tests/{unit,integration,concurrency,live,sandbox,e2e,helpers}
+├── frontend/src/{app,components,features,lib,pages,styles,config} · frontend/tests
+├── e2e/                     # Playwright journeys
+├── .github/workflows/       # ci.yml, security-review.yml
+├── Dockerfile · render.yaml # single-host deployment
+└── PRD.md · TRD.md · ARCHITECTURE.md · DATABASE_DESIGN.md · ALGORITHMS_AND_SECURITY.md · AI_USAGE.md · COMPLIANCE_MATRIX.md
 ```
 
-Request flow: `routes → middlewares → controllers → services → domain → repositories → PostgreSQL / Redis`. ESLint blocks driver/infrastructure imports outside the infrastructure, repository, db and composition-root layers.
+## Getting started (local)
 
-## Getting started
-
-Prerequisites: Node.js 22+ (tested on 26), a Supabase project, a Redis instance (e.g. Upstash).
+Prerequisites: Node.js 22+, a Supabase project (or any PostgreSQL 15+), a Redis instance (e.g. Upstash or local Redis).
 
 ```bash
-npm install                                  # installs both workspaces
-cp backend/.env.example backend/.env         # then fill in DATABASE_URL, REDIS_URL, JWT_SECRET
-cp frontend/.env.example frontend/.env       # optional (defaults work)
-npm run db:migrate                           # apply migrations to Supabase
+npm install                                  # both workspaces
+cp backend/.env.example backend/.env         # fill DATABASE_URL, REDIS_URL, JWT_SECRET (never commit .env)
+npm run db:migrate                           # apply migrations
 npm run db:seed                              # demo users, venues, events, seats
 npm run dev:backend                          # http://localhost:4000
-npm run dev:frontend                         # http://localhost:5173 (proxies /api)
+npm run dev:frontend                         # http://localhost:5173 (proxies /api to the backend)
 ```
 
-### Backend environment
+Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
+
+## Environment configuration
+
+### Backend (`backend/.env`, never committed)
 
 | Variable | Required | Notes |
 | --- | --- | --- |
+| `NODE_ENV` | no (development) | `production` enables every production safety rule below |
+| `PORT` | no (4000) | HTTP port |
+| `LOG_LEVEL` | no (info) | `debug`/`trace` are rejected in production |
+| `TRUST_PROXY` | no (0) | Number of proxy hops (set `1` behind Render/Fly/NGINX so rate limits see the client IP) |
 | `DATABASE_URL` | yes | Supabase **session pooler** (port 5432) or direct URI. The transaction pooler (6543) is not supported. |
 | `DATABASE_SSL` | no (true) | Must be true in production |
 | `DATABASE_SSL_CA_PATH` | no | Path to the Supabase root CA to verify the server certificate |
+| `DATABASE_POOL_MAX` | no (10) | PostgreSQL pool size |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | no (15000) | Per-statement timeout |
 | `REDIS_URL` | yes | `redis://` or `rediss://` |
 | `REDIS_KEY_PREFIX` | no | default `ticketflow:` |
+| `BCRYPT_SALT_ROUNDS` | no (12) | 10–15 |
 | `JWT_SECRET` | yes | ≥ 32 random chars; placeholders rejected in production |
 | `CORS_ORIGINS` | yes | comma-separated allowlist, https only in production |
 | `MAX_TICKETS_PER_USER_PER_EVENT` | no (6) | |
+| `DEFAULT_CURRENCY` | no (BDT) | Currency of new events |
+| `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX` | no (900000, 300) | Global API limit per IP (Redis-backed, shared across instances) |
 | `SEAT_HOLD_TTL_SECONDS` | no (300) | |
 | `TEST_BYPASS_OTP` | no (false) | Rejected in production; OTP is always bypassed when `NODE_ENV=test` |
 | `ALLOW_SEED` | no (false) | Needed to seed when `NODE_ENV=production` |
@@ -101,7 +126,9 @@ npm run dev:frontend                         # http://localhost:5173 (proxies /a
 | `BOOKING_EXPIRY_INTERVAL_MS` | no (15000) | How often expired holds are released |
 | `BOOKING_RATE_LIMIT_MAX` | no (60) | Hold/checkout/cancel requests per window per IP |
 | `FRONTEND_URL` | no (first CORS origin) | Web app URL used for payment return pages |
-| `PUBLIC_API_URL` | no (`http://localhost:PORT`) | Public API URL given to SSLCommerz for IPN and browser returns |
+| `PUBLIC_API_URL` | production: yes (https) | Public API URL: SSLCommerz IPN/returns and banner image URLs. Defaults to `http://localhost:PORT` outside production |
+| `UPLOAD_DIR` | no (`uploads`) | Directory for uploaded event banners (use a persistent disk in production) |
+| `FRONTEND_DIST_DIR` | no | Built web app served by the API (single-host deployment; set by the Docker image) |
 | `PAYMENT_HOLD_EXTENSION_SECONDS` | no (900) | Seats stay held this long once payment starts |
 | `REFUND_MAX_ATTEMPTS` | no (5) | Refund attempts before giving up |
 | `ENABLE_MOCK_PAYMENTS` | no (true outside production) | Mock Provider A and B |
@@ -116,20 +143,36 @@ npm run dev:frontend                         # http://localhost:5173 (proxies /a
 
 The server validates every variable at startup and exits listing invalid names (never values).
 
+### Frontend (`frontend/.env`, optional)
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | `/api` | Keep `/api` (same origin) in development and in the single-host deployment |
+| `VITE_DEV_API_PROXY` | `http://localhost:4000` | Backend address for the Vite dev proxy |
+
+The server validates every variable at startup and exits listing invalid variable **names** (never values). In production it also refuses: console email, OTP bypass, non-Secure cookies, non-TLS database, http CORS origins or `PUBLIC_API_URL`, debug/trace logging, placeholder JWT secrets, and mock payments without a webhook secret.
+
+## Database migrations and seeding
+
+- Migrations live in `backend/db/migrations` (forward-only, numbered). The runner records each file with a SHA-256 checksum in `schema_migrations`, takes an advisory lock (safe with several instances) and refuses edited history.
+  - Apply: `npm run db:migrate` · Status: `npm run db:migrate:status -w backend`
+  - In the Docker image: `node dist/db/cli/migrate.js` (Render runs it as the pre-deploy command).
+- Seed: `npm run db:seed` is idempotent (re-running re-anchors event dates to "now"). Refused in production unless `ALLOW_SEED=true`.
+- Consistency check: `npm run db:schema-report -w backend` compares the live database with a fresh database built from the migrations and with `DATABASE_DESIGN.md` (columns, constraints, indexes, triggers, functions, RLS).
+
 ## Scripts
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev:backend` / `npm run dev:frontend` | Development servers |
 | `npm run build` | Compile backend (`backend/dist`) and frontend (`frontend/dist`) |
-| `npm run typecheck` | Strict TypeScript for both workspaces |
-| `npm run lint` / `npm run format:check` | ESLint / Prettier |
-| `npm test` | Backend unit + integration and frontend tests |
-| `npm run test:coverage` | Same with coverage (80% thresholds) |
-| `npm run db:migrate` · `npm run db:migrate:status -w backend` | Apply / list migrations |
-| `npm run db:seed` | Idempotent demo seed |
-| `npm run test:live -w backend` | Live checks against the Supabase + Redis in `backend/.env` |
-| `npm run test:concurrency -w backend` | Booking concurrency suite on real PostgreSQL (embedded) + the real Redis in `backend/.env` |
+| `npm run typecheck` · `npm run lint` · `npm run format:check` | TypeScript, ESLint, Prettier |
+| `npm test` · `npm run test:coverage` | Backend unit + integration and frontend tests (coverage thresholds enforced) |
+| `npm run test:concurrency -w backend` | Booking concurrency on real PostgreSQL + the Redis in `backend/.env` |
+| `npm run test:live -w backend` | Read-only checks against your Supabase + Redis |
+| `npm run test:sandbox -w backend` | SSLCommerz sandbox checks with the store in `backend/.env` (no tunnel needed) |
+| `npm run e2e` | Builds the web app and runs the Playwright journeys on a self-contained stack |
+| `npm run db:migrate` · `npm run db:seed` · `npm run db:schema-report -w backend` | Database tasks |
 
 ## API
 
@@ -164,20 +207,29 @@ The server validates every variable at startup and exits listing invalid names (
 | GET | `/api/dashboard/organizer/events/:id` | One event: sales, category breakdown, bookings with masked customer emails (`status`, `page`, `pageSize`) |
 | GET | `/api/admin/overview` · `/api/admin/users` | ADMIN only: platform totals, failed refunds, open payments, notification delivery; user directory (`q`, `role`, pages) |
 | * | `/api/organizer/venues[/:id]` | Venue CRUD (ORGANIZER own / ADMIN all) |
+| POST · DELETE | `/api/organizer/events/:id/banner` | Banner image upload (multipart field `image`; JPEG/PNG/WebP, ≤ 2 MB, content-verified) / remove |
+| GET | `/uploads/:key` | Public banner image (server-generated names only; `nosniff`, sandboxed CSP) |
 | * | `/api/organizer/events[/:id]` | Event CRUD, `PUT …/seat-map`, `PATCH …/categories/:categoryId`, `PATCH …/seats/category`, `POST …/publish|unpublish|cancel` |
 
 Every response uses one envelope: `{ "success": true, "data": … }` or `{ "success": false, "error": { "code", "message", "details?", "requestId" } }`. Each response carries an `X-Request-Id` header.
 
 ## Testing
 
-- **Unit** (`backend/tests/unit`): config validation, log redaction, CORS, state machines, middlewares, error mapping, transaction retry logic, Redis lock/TTL primitives (ioredis-mock), seed data.
-- **Integration** (`backend/tests/integration`): runs against a real throwaway PostgreSQL started automatically (`embedded-postgres`, or set `TEST_DATABASE_URL`). Covers migrations, double-booking under 8 concurrent transactions, composite FKs, trigger/state-machine parity, payments/refunds uniqueness, transactions, the seeder and the HTTP health API.
-- **Live** (`backend/tests/live`): read-only checks against your Supabase and Redis (migrated schema, RLS/privilege lockdown, demo data, real transaction rolled back, Redis locks/TTL).
-- **Frontend** (`frontend/tests`): API client, auth flows (login, register, OTP, protected routes, open-redirect guard), events list/details, organizer venues/events/seat map editor, booking/payment flows, notification bell and inbox, customer/organizer/admin dashboards, error boundaries.
-- **Notifications** (`backend/tests/integration/api/notifications.api.test.ts`): Email + In-App delivery, enqueue-in-transaction and rollback, dedupe, retry with backoff, max attempts, expired-lease reclaim, parallel workers (exactly once), cancellation refund wording, reminder window / <1 h / started-event skip / parallel schedulers, inbox ownership, pagination and read state. Dashboards: `dashboard.api.test.ts` (stats, ownership 404, RBAC 403, masked emails, admin search).
-- **Auth & authorization coverage** (`backend/tests/integration/api`): OTP hashing, expiry, attempt limit, replay, resend cooldown, bypass mode, cookie flags, forged/`alg:none`/revoked tokens, RBAC (401/403), IDOR on venues and events (404), destructive-change guards with active bookings, public discovery filters and data exposure.
+| Suite | Command | What it covers |
+| --- | --- | --- |
+| Backend unit | `npm run test:unit -w backend` | config + production rules, redaction, CORS, state machines, pricing, payment rules/adapters, idempotency, notification templates/dispatcher/backoff, upload content checks, storage traversal, rate-limit store |
+| Backend integration | `npm run test:integration -w backend` | real PostgreSQL (embedded or `TEST_DATABASE_URL`): migrations, triggers, auth/OTP/RBAC/IDOR, events, discovery, holds, ticket limit, payments, webhooks, idempotency, refunds, cancellation, notifications and reminders, dashboards, uploads, SPA serving |
+| Concurrency | `npm run test:concurrency -w backend` | many simultaneous holds on the same seats with real Redis + PostgreSQL: exactly one winner, limit never exceeded |
+| Live | `npm run test:live -w backend` | Supabase schema/RLS, demo data, Redis locks against your real services |
+| SSLCommerz sandbox | `npm run test:sandbox -w backend` | real sandbox: session creation, pending verification, forged `val_id`, refund request shape, signed-but-unpaid IPN cannot confirm |
+| Frontend | `npm test -w frontend` | API client, auth flows, events, seat selection, booking/payment/cancel, organizer pages, notifications, dashboards, banner upload |
+| End-to-end | `npm run e2e` | Playwright: registration + OTP, login, discovery, seat selection, payment, confirmation email, cancellation with refund, organizer venue/event management and publishing, organizer booking overview, RBAC |
 
-## Testing payments on localhost
+The E2E stack (`npm run e2e:server -w backend`) starts an embedded PostgreSQL with the demo seed, an in-memory Redis, a real OTP flow whose emails go to `backend/.tmp/e2e-mailbox.jsonl`, and serves the built web app, never reading `backend/.env`. First run: `npx playwright install chromium`.
+
+### Manual testing guides
+
+### Payments
 
 1. Hold seats as a customer (see below), then pick a payment method on the booking page:
    - **Mock Provider A**: opens a simulated hosted card page with **Pay now** / **Decline payment**. The provider then sends an HMAC-signed webhook that the API verifies before confirming.
@@ -186,7 +238,7 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 2. **Cancel** a confirmed booking: the dialog shows the refund decision first. Events more than 24 hours away get a full refund; within 24 hours, none. "Classical Evening (starts soon)" shows the no-refund case (re-run `npm run db:seed` to move it 3 hours ahead again).
 3. Refund status appears on the booking page; failed refunds can be retried and are also retried automatically.
 
-## Testing notifications and dashboards on localhost
+### Notifications and dashboards
 
 1. With `EMAIL_TRANSPORT=console` (default) every email is printed in the **backend terminal** under `[DEV MAIL]`.
 2. Book and pay as `customer.demo@example.com`: within a second the confirmation email appears in the terminal and the 🔔 **Notifications** badge in the header shows 1. Open it to read, mark one or all as read.
@@ -194,7 +246,7 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 4. **Reminder**: book an event that starts in 1–2 hours (create one as the organizer with a start time ~90 minutes ahead). Within `NOTIFICATION_WORKER_INTERVAL_MS` the reminder email and in-app notification arrive, once only. Events less than 1 hour away are not reminded.
 5. **Dashboards**: customers see `/account` (stats, upcoming bookings, notifications); organizers see sales and booking statistics on `/organizer` and per-event bookings via **Bookings**; `admin.demo@example.com` gets `/admin` with platform totals and the user directory.
 
-## Testing seat booking on localhost
+### Seat booking
 
 1. Start both apps, sign in as `customer.demo@example.com` and open an event (e.g. "Chattogram Tech Summit", which has an early-bird discount).
 2. Click seats (max 6). The summary shows the server-calculated price; click **Hold … seats for 5 minutes**.
@@ -202,7 +254,7 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 4. Open the same event in a private window as `customer2.demo@example.com`: held seats show as unavailable (availability refreshes every 10 s), and picking a just-taken seat returns a clear "just taken" message.
 5. Let a hold run out: the countdown reaches zero, the page shows "expired", and the worker releases the seats within ~15 s.
 
-## Testing authentication and authorization on localhost
+### Authentication and authorization
 
 1. Start both apps in two terminals: `npm run dev:backend` and `npm run dev:frontend`, then open http://localhost:5173.
 2. **Sign in** with a demo account from the table above (the login page has "Use" buttons). Organizers land on `/organizer`, customers on `/account`.
@@ -212,8 +264,24 @@ Every response uses one envelope: `{ "success": true, "data": … }` or `{ "succ
 6. **Logout revocation**: sign out; the old cookie is denylisted in Redis until it would have expired.
 7. **Bypass mode** (automation only): `TEST_BYPASS_OTP=true` skips the OTP outside production; it is rejected when `NODE_ENV=production`.
 
-## Security baseline (in place)
+## Deployment
 
-Helmet (strict CSP for JSON API, HSTS in production), strict CORS allowlist with credentials, JSON body limit 100 kB, global API rate limiting (health probes exempt), Zod validation middleware, central error handler that never leaks internals in production, Pino logs with redaction of passwords, tokens, cookies, OTPs, card data and secrets, request ids, env validation with production safety rules, Supabase Data API locked (RLS + revoked privileges), bcrypt-hashed seed passwords, secrets only in untracked `.env` files.
+**Architecture (single host):** one Docker container runs the API and serves the built React app from the same origin (so the httpOnly `SameSite=Lax` session cookie works without third-party cookies), plus **Supabase PostgreSQL** and a managed **Redis** (Upstash / Redis Cloud, `rediss://`). The repository includes a `Dockerfile` and a Render Blueprint (`render.yaml`); any Docker host (Render, Railway, Fly.io, a VM) works the same way.
 
-See [DATABASE_DESIGN.md](DATABASE_DESIGN.md) for the schema and integrity rules.
+1. **Database**: create a Supabase project; use the **session pooler** connection string (port 5432) as `DATABASE_URL`, `DATABASE_SSL=true` (optionally `DATABASE_SSL_CA_PATH` with the Supabase CA). Migrations run automatically before each deploy (`preDeployCommand`), or run `npm run db:migrate` once from your machine. Seed only if you want demo data (`ALLOW_SEED=true npm run db:seed`).
+2. **Redis**: create a Redis database and set `REDIS_URL` (TLS `rediss://`). It holds seat locks, OTPs, session revocations and rate-limit counters; no persistence is required, but use a dedicated database or `REDIS_KEY_PREFIX`.
+3. **Web service**: on Render choose *New → Blueprint* with this repository (or a Docker web service). Set the secrets marked `sync: false` in `render.yaml`: `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS` and `FRONTEND_URL` and `PUBLIC_API_URL` (all the service's https URL), SMTP settings, and SSLCommerz credentials. `JWT_SECRET` is generated. Keep `TRUST_PROXY=1`.
+4. **Uploads**: banners are stored on local disk; attach the persistent disk from `render.yaml` (mounted at `/app/backend/uploads`) or images are lost on redeploy.
+5. **SSLCommerz**: in the merchant panel the IPN URL is `https://<your-host>/api/payments/webhooks/SSLCOMMERZ`; set `SSLCOMMERZ_SANDBOX=false` only with live credentials.
+6. **CI/CD**: GitHub Actions runs on every push/PR. On `main`, after all checks pass, the `deploy` job calls the Render deploy hook stored in the repository secret `RENDER_DEPLOY_HOOK_URL` (`autoDeploy` is off in `render.yaml` so only tested commits deploy). The AI security review needs the secret `CLAUDE_API_KEY`.
+7. **Verify**: `GET /api/health/ready` returns `schemaVersion` and both dependencies `up`; sign in with a demo account (if seeded) and make a booking.
+
+Secrets live only in the hosting dashboard / GitHub secrets and `backend/.env` locally; `.gitignore` and `.dockerignore` exclude every `.env*` file (except `.env.example`), and CI fails if one is committed.
+
+## Security
+
+Summary of controls (details and the audit in [ALGORITHMS_AND_SECURITY.md](ALGORITHMS_AND_SECURITY.md)): bcrypt (12 rounds), httpOnly + Secure (production) + SameSite cookies, HS256 JWT with pinned algorithm and jti revocation, hashed OTPs with attempt limits, RBAC + ownership (foreign resources answer 404), Zod validation on every input, parameterized SQL only, Helmet with `default-src 'none'` for the API and a strict CSP for the web app, strict CORS allowlist (blocks cross-site state-changing requests), Redis-backed rate limits, verified webhooks/IPN + server-side payment validation, idempotency keys and webhook deduplication, content-verified uploads with random names, redacted structured logs, no stack traces outside development.
+
+## Documentation
+
+[PRD.md](PRD.md) · [TRD.md](TRD.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [DATABASE_DESIGN.md](DATABASE_DESIGN.md) · [ALGORITHMS_AND_SECURITY.md](ALGORITHMS_AND_SECURITY.md) · [AI_USAGE.md](AI_USAGE.md) · [COMPLIANCE_MATRIX.md](COMPLIANCE_MATRIX.md)

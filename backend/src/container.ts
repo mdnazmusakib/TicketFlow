@@ -11,6 +11,12 @@ import {
 } from './controllers/EventController';
 import { DashboardController, NotificationController } from './controllers/DashboardController';
 import { HealthController } from './controllers/HealthController';
+import { UploadController } from './controllers/UploadController';
+import type { FileStorage } from './domain/uploads/FileStorage';
+import { LocalFileStorage } from './infrastructure/storage/LocalFileStorage';
+import { RedisRateLimitStore } from './infrastructure/redis/RedisRateLimitStore';
+import type { Store } from 'express-rate-limit';
+import { EventBannerService } from './services/events/EventBannerService';
 import { PaymentController } from './controllers/PaymentController';
 import type { EmailSender } from './domain/notifications/email';
 import { PaymentGatewayRegistry, type PaymentGateway } from './domain/payments/PaymentGateway';
@@ -73,6 +79,7 @@ export interface Controllers {
   payments: PaymentController;
   notifications: NotificationController;
   dashboards: DashboardController;
+  uploads: UploadController;
 }
 
 export interface Infrastructure {
@@ -100,6 +107,8 @@ export interface Container {
   expiryWorker: BookingExpiryWorker;
   /** Reminder scheduling + notification outbox delivery. */
   notificationWorker: IntervalWorker;
+  /** Redis-backed rate-limit storage, one namespace per limiter. */
+  rateLimitStore: (name: string) => Store;
   /** Connects to Redis and verifies PostgreSQL. Fails fast on startup. */
   start(): Promise<void>;
   /** Closes every connection; safe to call more than once. */
@@ -116,6 +125,8 @@ export interface ContainerOverrides {
   now?: () => Date;
   /** Replaces/extends the configured payment gateways (e.g. SSLCommerz with a fake HTTP client). */
   paymentGateways?: PaymentGateway[];
+  /** Where uploaded images are stored (default: local disk at UPLOAD_DIR). */
+  fileStorage?: FileStorage;
   /** Deliver notifications right after commit (default true). Tests disable it for determinism. */
   notificationImmediateDelivery?: boolean;
 }
@@ -187,6 +198,13 @@ export function buildContainer(
     defaultCurrency: config.booking.defaultCurrency,
   });
   const discoveryService = new EventDiscoveryService(events, seatMaps);
+  const bannerService = new EventBannerService(
+    db,
+    events,
+    overrides.fileStorage ?? new LocalFileStorage(config.uploads.dir),
+    config.urls.publicApi,
+    logger,
+  );
 
   // Payment gateways (adapters); booking code only sees the PaymentGateway interface.
   const mockLedger = new MockPaymentLedger(ttlStore);
@@ -346,6 +364,7 @@ export function buildContainer(
       auth: new AuthController(authService, config.auth.cookie),
       venues: new VenueController(venueService),
       organizerEvents: new OrganizerEventController(eventService),
+      uploads: new UploadController(bannerService),
       publicEvents: new PublicEventController(discoveryService),
       bookings: new BookingController(bookingService, cancellationService),
       payments: new PaymentController(
@@ -368,6 +387,7 @@ export function buildContainer(
     gateways,
     expiryWorker,
     notificationWorker,
+    rateLimitStore: (name) => new RedisRateLimitStore(redis, name),
     async start() {
       if (redis.status === 'wait') await redis.connect();
       await db.ping();

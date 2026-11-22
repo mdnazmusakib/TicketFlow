@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import RedisMock from 'ioredis-mock';
 import type Redis from 'ioredis';
 import request from 'supertest';
@@ -7,6 +10,7 @@ import { createApp } from '../../src/app';
 import { buildContainer, type Container } from '../../src/container';
 import { createRedisClient } from '../../src/infrastructure/redis/client';
 import { RedisTtlStore } from '../../src/infrastructure/redis/TtlStore';
+import { LocalFileStorage } from '../../src/infrastructure/storage/LocalFileStorage';
 import type { EmailMessage, EmailSender } from '../../src/domain/notifications/email';
 import type { PaymentGateway } from '../../src/domain/payments/PaymentGateway';
 import { captureLogger, testConfig } from './testApp';
@@ -36,6 +40,8 @@ export interface ApiHarness {
   container: Container;
   config: ReturnType<typeof testConfig>;
   keyPrefix: string;
+  /** Temporary directory backing uploaded files for this harness. */
+  uploadDir: string;
   /** True when backed by a real Redis server (TEST_REDIS_URL). */
   realRedis: boolean;
   close(): Promise<void>;
@@ -69,12 +75,14 @@ export async function createApiHarness(
     : (new RedisMock({ keyPrefix: config.redis.keyPrefix }) as unknown as Redis);
   if (realRedis) await redis.connect();
   const emails = new InMemoryEmailSender();
+  const uploadDir = mkdtempSync(path.join(tmpdir(), 'tf-uploads-'));
   const container = buildContainer(config, captureLogger().logger, {
     db: testDb.db,
     redis,
     emailSender: emails,
     otpBypass: options.otpBypass ?? false,
     notificationImmediateDelivery: false,
+    fileStorage: new LocalFileStorage(uploadDir),
     ...(options.now ? { now: options.now } : {}),
     ...(options.paymentGateways ? { paymentGateways: options.paymentGateways } : {}),
   });
@@ -92,6 +100,7 @@ export async function createApiHarness(
     container,
     config,
     keyPrefix: config.redis.keyPrefix,
+    uploadDir,
     realRedis,
     async close() {
       await container.expiryWorker.stop();
@@ -106,6 +115,7 @@ export async function createApiHarness(
         redis.disconnect();
       }
       await testDb.drop();
+      rmSync(uploadDir, { recursive: true, force: true });
     },
   };
 }

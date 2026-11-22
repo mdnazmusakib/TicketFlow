@@ -29,7 +29,12 @@ export function createApiRouter(controllers: Controllers, guards: RouteGuards): 
   router.use('/payments', createPaymentRouter(controllers.payments, guards));
   router.use(
     '/organizer',
-    createOrganizerRouter(controllers.venues, controllers.organizerEvents, guards.authenticate),
+    createOrganizerRouter(
+      controllers.venues,
+      controllers.organizerEvents,
+      controllers.uploads,
+      guards.authenticate,
+    ),
   );
   router.use(
     '/notifications',

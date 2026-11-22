@@ -912,3 +912,41 @@ fieldset {
   margin: 0;
   white-space: pre-line;
 }
+
+/* Banners */
+.event-banner,
+.event-card__banner,
+.banner-upload__preview {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+}
+
+.event-banner {
+  max-height: 320px;
+  margin-bottom: 1rem;
+}
+
+.event-card__banner {
+  aspect-ratio: 16 / 9;
+  margin-bottom: 0.75rem;
+}
+
+.banner-upload {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.banner-upload__preview {
+  max-height: 200px;
+  margin-bottom: 0.75rem;
+}
+
+.banner-upload label[aria-disabled='true'] {
+  opacity: 0.6;
+  pointer-events: none;
+}

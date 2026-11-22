@@ -229,6 +229,7 @@ The index cannot contain `now()`, so expiry is explicit: the expiry worker flips
 | `currency` | CHAR(3) | |
 | `status` | VARCHAR(20) | `INITIATED` (default) \| `PENDING` \| `SUCCEEDED` \| `FAILED` \| `CANCELLED` |
 | `idempotency_key` | VARCHAR(255) | NOT NULL, UNIQUE |
+| `transaction_ref` | VARCHAR(30) | NOT NULL, UNIQUE, `^[A-Za-z0-9_-]{8,30}$` (0007): merchant transaction id sent to providers |
 | `failure_reason` | TEXT | nullable |
 | `provider_metadata` | JSONB | non-sensitive metadata only (never card data or secrets) |
 | `paid_at` | TIMESTAMPTZ | set iff `SUCCEEDED` |
@@ -254,6 +255,8 @@ The index cannot contain `now()`, so expiry is explicit: the expiry worker flips
 | `provider_refund_id` | VARCHAR(255) | UNIQUE when present |
 | `reason`, `failure_reason` | TEXT | |
 | `processed_at` | TIMESTAMPTZ | required for `SUCCEEDED`/`FAILED` |
+| `attempt` | SMALLINT | NOT NULL DEFAULT 1, 1–20, unique per payment (0007) |
+| `next_retry_at` | TIMESTAMPTZ | nullable; when the refund worker retries this attempt (0007) |
 | `created_at`, `updated_at` | TIMESTAMPTZ | |
 
 Refunds are all-or-nothing (full refund if cancelled > 24 h before `start_at`, else none, so no row is created). Migration 0007 adds `attempt` (1–20, unique per payment) and `next_retry_at` (worker scan `idx_refunds_due`). Each attempt uses the idempotency key `refund_<transaction_ref>_<attempt>`: it is re-sent unchanged after a timeout, and a definitive failure schedules a new attempt with exponential backoff up to `REFUND_MAX_ATTEMPTS`. `uq_refunds_one_active_per_payment` — unique `(payment_id) WHERE status IN (PENDING, PROCESSING, SUCCEEDED)` — prevents racing duplicate refunds; a failed refund may be retried with a new row. `bookings.refund_amount_minor` is updated in the same transaction as the successful refund.
@@ -336,11 +339,32 @@ Decision: a dedicated outbox table was folded into `notifications`. Rows are ins
 
 ### 4.15 `audit_logs` (append-only)
 
-`id`, `actor_user_id` (→ users, nullable for system), `action` VARCHAR(100), `entity_type` VARCHAR(50), `entity_id` UUID, `metadata` JSONB (redacted), `ip_address` INET, `request_id` VARCHAR(100), `created_at`. Indexes `(entity_type, entity_id, created_at DESC)`, `(actor_user_id, created_at DESC)`. `UPDATE`/`DELETE` blocked.
+| Column | Type | Rules |
+| --- | --- | --- |
+| `id` | UUID | PK |
+| `actor_user_id` | UUID | → `users.id` RESTRICT; NULL for system actions |
+| `action` | VARCHAR(100) | NOT NULL |
+| `entity_type` | VARCHAR(50) | NOT NULL |
+| `entity_id` | UUID | nullable |
+| `metadata` | JSONB | NOT NULL DEFAULT `{}`, redacted (no secrets) |
+| `ip_address` | INET | nullable |
+| `request_id` | VARCHAR(100) | nullable |
+| `created_at` | TIMESTAMPTZ | NOT NULL DEFAULT `now()` |
+
+Indexes `(entity_type, entity_id, created_at DESC)`, `(actor_user_id, created_at DESC)`. `UPDATE`/`DELETE` blocked.
 
 ### 4.16 `schema_migrations`
 
-Managed by the migration runner: `version` (PK), `name`, `checksum` (SHA-256 of the file), `applied_at`. RLS enabled and API roles revoked.
+Managed by the migration runner (`backend/src/db/Migrator.ts`), not by a migration file.
+
+| Column | Type | Rules |
+| --- | --- | --- |
+| `version` | VARCHAR(4) | PK, e.g. `0008` |
+| `name` | VARCHAR(200) | NOT NULL, migration file name |
+| `checksum` | CHAR(64) | NOT NULL, SHA-256 of the file (edited history is rejected) |
+| `applied_at` | TIMESTAMPTZ | NOT NULL DEFAULT `now()` |
+
+RLS enabled and API roles revoked.
 
 ---
 

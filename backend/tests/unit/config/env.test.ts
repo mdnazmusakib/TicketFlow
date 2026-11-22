@@ -15,6 +15,7 @@ const production: NodeJS.ProcessEnv = {
   JWT_SECRET: 'Zq8vN3kL0pR7tX2wY5bC9dF4gH6jK1mQzA0sD8fG3hJ',
   EMAIL_TRANSPORT: 'smtp',
   SMTP_HOST: 'smtp.example.com',
+  PUBLIC_API_URL: 'https://api.ticketflow.example.com',
 };
 
 function issuesOf(env: NodeJS.ProcessEnv): string[] {
@@ -121,6 +122,8 @@ describe('loadConfig', () => {
       DATABASE_SSL: 'false',
       CORS_ORIGINS: 'http://insecure.example.com',
       JWT_SECRET: 'replace-with-at-least-32-random-characters-xxxxxxxx',
+      LOG_LEVEL: 'debug',
+      PUBLIC_API_URL: 'http://api.example.com',
     });
     expect(issues).toEqual(
       expect.arrayContaining([
@@ -128,6 +131,8 @@ describe('loadConfig', () => {
         'DATABASE_SSL: must be true in production',
         'CORS_ORIGINS: production origins must use https',
         'JWT_SECRET: looks like a placeholder; generate a random secret',
+        'LOG_LEVEL: debug/trace logging is not allowed in production',
+        'PUBLIC_API_URL: must be set to the public https URL of the API in production',
       ]),
     );
   });

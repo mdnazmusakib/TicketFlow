@@ -42,6 +42,9 @@ export function EventDetailPage({
   return (
     <article className="event-detail">
       <header className="card">
+        {event.bannerUrl && (
+          <img className="event-banner" src={event.bannerUrl} alt="" loading="lazy" />
+        )}
         <h1>{event.title}</h1>
         <p className="muted">
           {formatDateTime(event.startAt, event.venue.timezone)}

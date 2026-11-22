@@ -8,6 +8,7 @@ const PRODUCTION_ENV = {
   JWT_SECRET: 'Zq8vN3kL0pR7tX2wY5bC9dF4gH6jK1mQzA0sD8fG3hJ',
   EMAIL_TRANSPORT: 'smtp',
   SMTP_HOST: 'smtp.example.com',
+  PUBLIC_API_URL: 'https://api.ticketflow.example.com',
 };
 
 describe('Health API (real PostgreSQL + Redis mock)', () => {

@@ -111,6 +111,18 @@ export function createOrganizerApi(client: ApiClient = apiClient) {
     async deleteEvent(id: string) {
       await client.delete(eventPath(id));
     },
+    async uploadBanner(id: string, file: File) {
+      const form = new FormData();
+      form.append('image', file);
+      return (
+        await client.post<{ bannerUrl: string }>(`${eventPath(id)}/banner`, form, {
+          timeoutMs: 60_000,
+        })
+      ).data;
+    },
+    async removeBanner(id: string) {
+      await client.delete(`${eventPath(id)}/banner`);
+    },
   };
 }
 

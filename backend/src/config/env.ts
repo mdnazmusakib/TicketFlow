@@ -103,6 +103,10 @@ const envSchema = z
     FRONTEND_URL: urlWithProtocols(['http:', 'https:']).optional(),
     /** Public URL of this API, used by providers for IPN/return callbacks. */
     PUBLIC_API_URL: urlWithProtocols(['http:', 'https:']).optional(),
+    /** Directory for uploaded event banners (local disk storage). */
+    UPLOAD_DIR: z.string().trim().min(1).max(500).default('uploads'),
+    /** Built web app to serve from this server (single-host deployment); unset = API only. */
+    FRONTEND_DIST_DIR: z.string().trim().min(1).max(500).optional(),
     PAYMENT_HOLD_EXTENSION_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
     REFUND_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
     ENABLE_MOCK_PAYMENTS: booleanString.optional(),
@@ -173,6 +177,20 @@ const envSchema = z
         message: 'production origins must use https',
       });
     }
+    if (env.LOG_LEVEL === 'debug' || env.LOG_LEVEL === 'trace') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['LOG_LEVEL'],
+        message: 'debug/trace logging is not allowed in production',
+      });
+    }
+    if (!env.PUBLIC_API_URL || new URL(env.PUBLIC_API_URL).protocol !== 'https:') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_API_URL'],
+        message: 'must be set to the public https URL of the API in production',
+      });
+    }
     if (/replace-with|changeme|secret/i.test(env.JWT_SECRET)) {
       ctx.addIssue({
         code: 'custom',
@@ -237,6 +255,8 @@ export interface AppConfig {
   };
   allowSeed: boolean;
   urls: { frontend: string; publicApi: string };
+  uploads: { dir: string };
+  frontendDistDir: string | undefined;
   notifications: { reminderWindowMinutes: number; maxAttempts: number; workerIntervalMs: number };
   payments: {
     holdExtensionSeconds: number;
@@ -353,6 +373,8 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       frontend: (env.FRONTEND_URL ?? env.CORS_ORIGINS[0]!).replace(/\/$/, ''),
       publicApi: (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`).replace(/\/$/, ''),
     },
+    uploads: { dir: env.UPLOAD_DIR },
+    frontendDistDir: env.FRONTEND_DIST_DIR,
     payments: {
       holdExtensionSeconds: env.PAYMENT_HOLD_EXTENSION_SECONDS,
       refundMaxAttempts: env.REFUND_MAX_ATTEMPTS,

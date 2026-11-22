@@ -136,6 +136,9 @@ export function EventsPage({ api = defaultApi }: { api?: EventsApi }) {
           <ul className="event-grid">
             {results.data.items.map((event) => (
               <li key={event.id} className="card event-card">
+                {event.bannerUrl && (
+                  <img className="event-card__banner" src={event.bannerUrl} alt="" loading="lazy" />
+                )}
                 <h2>
                   <Link to={`/events/${event.id}`}>{event.title}</Link>
                 </h2>
