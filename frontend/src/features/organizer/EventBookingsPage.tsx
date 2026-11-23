@@ -62,19 +62,27 @@ export function EventBookingsPage({ api = defaultApi }: { api?: DashboardApi }) 
                 hint: `${overview.data.event.heldSeats} on hold`,
               },
               {
-                label: 'Gross revenue',
+                label: 'Ticket sales',
                 value: formatMoney(
                   overview.data.event.grossRevenueMinor,
                   overview.data.event.currency,
                 ),
               },
               {
-                label: 'Net revenue',
+                label: 'Net ticket sales',
                 value: formatMoney(
                   overview.data.event.netRevenueMinor,
                   overview.data.event.currency,
                 ),
                 hint: `${formatMoney(overview.data.event.refundedMinor, overview.data.event.currency)} refunded`,
+              },
+              {
+                label: 'Platform charges + VAT',
+                value: formatMoney(
+                  overview.data.event.platformFeesMinor + overview.data.event.vatMinor,
+                  overview.data.event.currency,
+                ),
+                hint: 'Paid by customers on top of tickets; not organizer earnings',
               },
             ]}
           />

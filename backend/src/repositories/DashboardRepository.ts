@@ -15,8 +15,31 @@ export interface EventSalesStats {
   totalSeats: number;
   soldSeats: number;
   heldSeats: number;
+  /** Ticket sales only (ticket subtotals of paid bookings): the organizer's side. */
   grossRevenueMinor: number;
+  /** Refunded ticket amounts. */
   refundedMinor: number;
+  /** Collected on top of tickets for this event; NOT organizer earnings. */
+  platformFeesMinor: number;
+  refundedPlatformFeesMinor: number;
+  vatMinor: number;
+  refundedVatMinor: number;
+}
+
+export interface FinanceSummary {
+  from: Date | null;
+  to: Date | null;
+  currency: string;
+  payments: number;
+  ticketSalesMinor: number;
+  platformFeeMinor: number;
+  vatMinor: number;
+  customerPaymentsMinor: number;
+  refunds: number;
+  refundedTicketMinor: number;
+  refundedPlatformFeeMinor: number;
+  refundedVatMinor: number;
+  refundedTotalMinor: number;
 }
 
 /** Read-only aggregates for dashboards (all money in minor units). */
@@ -95,11 +118,25 @@ export class DashboardRepository {
               (SELECT count(*) FROM booking_seats bs WHERE bs.event_id = e.id AND bs.seat_state = 'BOOKED') AS sold_seats,
               (SELECT count(*) FROM booking_seats bs JOIN bookings b ON b.id = bs.booking_id
                  WHERE bs.event_id = e.id AND bs.seat_state = 'HELD' AND ${ACTIVE_ALLOCATION_SQL}) AS held_seats,
-              (SELECT coalesce(sum(p.amount_minor), 0) FROM payments p JOIN bookings b ON b.id = p.booking_id
-                 WHERE b.event_id = e.id AND p.status = 'SUCCEEDED') AS gross_minor,
-              (SELECT coalesce(sum(r.amount_minor), 0) FROM refunds r JOIN bookings b ON b.id = r.booking_id
-                 WHERE b.event_id = e.id AND r.status = 'SUCCEEDED') AS refunded_minor
+              paid.ticket_minor AS gross_minor, paid.fee_minor, paid.vat_minor,
+              refunded.ticket_minor AS refunded_minor, refunded.fee_minor AS refunded_fee_minor,
+              refunded.vat_minor AS refunded_vat_minor
        FROM events e
+       -- Paid bookings: their financial snapshot split into tickets / platform fee / VAT.
+       CROSS JOIN LATERAL (
+         SELECT coalesce(sum(b.ticket_subtotal_minor), 0) AS ticket_minor,
+                coalesce(sum(b.platform_fee_minor), 0) AS fee_minor,
+                coalesce(sum(b.vat_minor), 0) AS vat_minor
+         FROM payments p JOIN bookings b ON b.id = p.booking_id
+         WHERE b.event_id = e.id AND p.status = 'SUCCEEDED'
+       ) paid
+       CROSS JOIN LATERAL (
+         SELECT coalesce(sum(r.ticket_minor), 0) AS ticket_minor,
+                coalesce(sum(r.platform_fee_minor), 0) AS fee_minor,
+                coalesce(sum(r.vat_minor), 0) AS vat_minor
+         FROM refunds r JOIN payments p ON p.id = r.payment_id JOIN bookings b ON b.id = r.booking_id
+         WHERE b.event_id = e.id AND r.status = 'SUCCEEDED' AND p.status = 'SUCCEEDED'
+       ) refunded
        WHERE ($1::uuid IS NULL OR e.organizer_id = $1)
          AND ($2::uuid IS NULL OR e.id = $2)
          AND ($3::boolean = false OR (e.start_at > now() AND e.status IN ('DRAFT', 'PUBLISHED')))
@@ -122,7 +159,65 @@ export class DashboardRepository {
       heldSeats: num(row.held_seats),
       grossRevenueMinor: num(row.gross_minor),
       refundedMinor: num(row.refunded_minor),
+      platformFeesMinor: num(row.fee_minor),
+      refundedPlatformFeesMinor: num(row.refunded_fee_minor),
+      vatMinor: num(row.vat_minor),
+      refundedVatMinor: num(row.refunded_vat_minor),
     }));
+  }
+
+  /**
+   * Platform finance for a period (payments by paid_at, refunds by processed_at).
+   * Only captures that bought a booking (SUCCEEDED payments) count; duplicate captures are
+   * excluded on both sides because they are refunded in full. VAT is reported as a
+   * separate liability, never as platform revenue.
+   */
+  async financeSummary(range: { from?: Date; to?: Date }): Promise<FinanceSummary> {
+    const { rows } = await this.db.query<Record<string, unknown>>(
+      `SELECT
+         (SELECT count(*) FROM payments p
+            WHERE p.status = 'SUCCEEDED' AND ($1::timestamptz IS NULL OR p.paid_at >= $1)
+              AND ($2::timestamptz IS NULL OR p.paid_at < $2)) AS payments,
+         s.ticket_minor, s.fee_minor, s.vat_minor, s.paid_minor,
+         r.refunds, r.ticket_minor AS r_ticket, r.fee_minor AS r_fee, r.vat_minor AS r_vat, r.total_minor AS r_total
+       FROM (
+         SELECT coalesce(sum(b.ticket_subtotal_minor), 0) AS ticket_minor,
+                coalesce(sum(b.platform_fee_minor), 0) AS fee_minor,
+                coalesce(sum(b.vat_minor), 0) AS vat_minor,
+                coalesce(sum(p.amount_minor), 0) AS paid_minor
+         FROM payments p JOIN bookings b ON b.id = p.booking_id
+         WHERE p.status = 'SUCCEEDED' AND ($1::timestamptz IS NULL OR p.paid_at >= $1)
+           AND ($2::timestamptz IS NULL OR p.paid_at < $2)
+       ) s,
+       (
+         SELECT count(*) AS refunds,
+                coalesce(sum(rf.ticket_minor), 0) AS ticket_minor,
+                coalesce(sum(rf.platform_fee_minor), 0) AS fee_minor,
+                coalesce(sum(rf.vat_minor), 0) AS vat_minor,
+                coalesce(sum(rf.amount_minor), 0) AS total_minor
+         FROM refunds rf JOIN payments p ON p.id = rf.payment_id
+         WHERE rf.status = 'SUCCEEDED' AND p.status = 'SUCCEEDED'
+           AND ($1::timestamptz IS NULL OR rf.processed_at >= $1)
+           AND ($2::timestamptz IS NULL OR rf.processed_at < $2)
+       ) r`,
+      [range.from ?? null, range.to ?? null],
+    );
+    const row = rows[0] ?? {};
+    return {
+      from: range.from ?? null,
+      to: range.to ?? null,
+      currency: 'BDT',
+      payments: num(row.payments),
+      ticketSalesMinor: num(row.ticket_minor),
+      platformFeeMinor: num(row.fee_minor),
+      vatMinor: num(row.vat_minor),
+      customerPaymentsMinor: num(row.paid_minor),
+      refunds: num(row.refunds),
+      refundedTicketMinor: num(row.r_ticket),
+      refundedPlatformFeeMinor: num(row.r_fee),
+      refundedVatMinor: num(row.r_vat),
+      refundedTotalMinor: num(row.r_total),
+    };
   }
 
   async eventStatusCounts(organizerId: string | null): Promise<Record<string, number>> {

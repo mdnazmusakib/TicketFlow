@@ -115,6 +115,14 @@ const envSchema = z
     BOOKING_EXPIRY_INTERVAL_MS: z.coerce.number().int().min(1000).max(600000).default(15000),
     /** Hold/checkout/cancel requests per window per IP. */
     BOOKING_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+    /** Platform charge per booked seat, minor units (1000 = BDT 10). TicketFlow revenue. */
+    PLATFORM_FEE_PER_SEAT_MINOR: z.coerce.number().int().min(0).max(100_000_000).default(1000),
+    /** VAT on the ticket subtotal, basis points (200 = 2%). Configurable business rule. */
+    VAT_RATE_BPS: z.coerce.number().int().min(0).max(10_000).default(200),
+    /** Return the platform fee when a cancellation is refundable (default: no). */
+    REFUND_PLATFORM_FEE: booleanString.default(false),
+    /** Return the VAT when a cancellation is refundable (default: no; review with a tax adviser). */
+    REFUND_VAT: booleanString.default(false),
     DEFAULT_CURRENCY: z
       .string()
       .regex(/^[A-Z]{3}$/)
@@ -321,6 +329,12 @@ export interface AppConfig {
     expiryIntervalMs: number;
     rateLimitMax: number;
   };
+  charges: {
+    platformFeePerSeatMinor: number;
+    vatRateBps: number;
+    refundPlatformFee: boolean;
+    refundVat: boolean;
+  };
   rateLimit: {
     windowMs: number;
     max: number;
@@ -443,6 +457,12 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       defaultCurrency: env.DEFAULT_CURRENCY,
       expiryIntervalMs: env.BOOKING_EXPIRY_INTERVAL_MS,
       rateLimitMax: env.BOOKING_RATE_LIMIT_MAX,
+    },
+    charges: {
+      platformFeePerSeatMinor: env.PLATFORM_FEE_PER_SEAT_MINOR,
+      vatRateBps: env.VAT_RATE_BPS,
+      refundPlatformFee: env.REFUND_PLATFORM_FEE,
+      refundVat: env.REFUND_VAT,
     },
     rateLimit: {
       windowMs: env.RATE_LIMIT_WINDOW_MS,

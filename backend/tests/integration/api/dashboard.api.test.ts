@@ -47,13 +47,14 @@ describe('Dashboards (customer, organizer, admin)', () => {
       expect(res.body.data.stats).toEqual({
         totalBookings: 1,
         upcomingBookings: 1,
-        paidMinor: 200000,
+        // Customer paid tickets 2,000.00 + platform 20.00 + VAT 2% 40.00.
+        paidMinor: 206000,
         refundedMinor: 0,
         refundsInProgress: 0,
-        netSpentMinor: 200000,
+        netSpentMinor: 206000,
       });
       expect(res.body.data.upcoming).toEqual([
-        expect.objectContaining({ bookingId: confirmedId, seatCount: 2, totalAmountMinor: 200000 }),
+        expect.objectContaining({ bookingId: confirmedId, seatCount: 2, totalAmountMinor: 206000 }),
       ]);
       expect(res.body.data.recentNotifications).toEqual([
         expect.objectContaining({ type: 'BOOKING_CONFIRMED', bookingId: confirmedId }),
@@ -83,9 +84,12 @@ describe('Dashboards (customer, organizer, admin)', () => {
         events: 1,
         soldSeats: 2,
         heldSeats: 1,
+        // Organizer earnings = ticket sales only; platform fee and VAT are reported apart.
         grossRevenueMinor: 200000,
         refundedMinor: 0,
         netRevenueMinor: 200000,
+        platformFeesMinor: 2000,
+        vatMinor: 4000,
       });
       expect(res.body.data.eventsByStatus).toEqual({ PUBLISHED: 1 });
       expect(res.body.data.bookingsByStatus).toEqual({ CONFIRMED: 1, HELD: 1 });

@@ -5,6 +5,7 @@ import type {
   DashboardApi,
   EventOverview,
   EventSales,
+  FinanceReport,
   OrganizerDashboard,
 } from '../src/features/dashboard/dashboardApi';
 import type {
@@ -44,6 +45,8 @@ export const eventSales: EventSales = {
   grossRevenueMinor: 500000,
   refundedMinor: 100000,
   netRevenueMinor: 400000,
+  platformFeesMinor: 5000,
+  vatMinor: 8000,
 };
 
 export const customerDashboard: CustomerDashboard = {
@@ -80,6 +83,8 @@ export const organizerDashboard: OrganizerDashboard = {
     grossRevenueMinor: 500000,
     refundedMinor: 100000,
     netRevenueMinor: 400000,
+    platformFeesMinor: 5000,
+    vatMinor: 8000,
   },
   eventsByStatus: { PUBLISHED: 1, DRAFT: 1 },
   bookingsByStatus: { CONFIRMED: 3, PENDING_PAYMENT: 1 },
@@ -151,6 +156,18 @@ export const adminOverview: AdminOverview = {
   notificationDelivery: { SENT: 70, FAILED: 1 },
 };
 
+export const financeReport: FinanceReport = {
+  period: { from: null, to: null },
+  currency: 'BDT',
+  payments: 12,
+  refunds: 2,
+  customerPaymentsMinor: 1_560_000 + 15_600,
+  ticketSales: { grossMinor: 1_500_000, refundedMinor: 50_000, netMinor: 1_450_000 },
+  platformRevenue: { grossMinor: 30_000, refundedMinor: 0, netMinor: 30_000 },
+  vatLiability: { collectedMinor: 30_000, refundedMinor: 0, netMinor: 30_000 },
+  refundedTotalMinor: 50_000,
+};
+
 export const adminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   id: 'u1',
   name: 'Olivia Organizer',
@@ -169,6 +186,7 @@ export function fakeDashboardApi(): jest.Mocked<DashboardApi> {
     organizer: jest.fn().mockResolvedValue(organizerDashboard),
     eventOverview: jest.fn().mockResolvedValue(eventOverview),
     adminOverview: jest.fn().mockResolvedValue(adminOverview),
+    adminFinance: jest.fn().mockResolvedValue(financeReport),
     adminUsers: jest.fn().mockResolvedValue({
       items: [adminUser()],
       meta: { page: 1, pageSize: 20, total: 1, totalPages: 1 },

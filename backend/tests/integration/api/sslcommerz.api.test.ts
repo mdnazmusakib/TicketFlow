@@ -161,7 +161,9 @@ describe('SSLCommerz integration (adapter against a simulated sandbox API)', () 
     await h.container.services.refunds.processDue();
     const view = await agent.get(`/api/bookings/${bookingId}`).expect(200);
     expect(view.body.data.refunds[0].status).toBe('SUCCEEDED');
-    expect(view.body.data.refundAmountMinor).toBe(view.body.data.totalAmountMinor);
+    // Policy refund: the ticket price (platform fee and VAT are kept by default).
+    expect(view.body.data.refundAmountMinor).toBe(view.body.data.charges.ticketSubtotalMinor);
+    expect(view.body.data.refunds[0]).toMatchObject({ platformFeeMinor: 0, vatMinor: 0 });
     expect(ssl.refundCalls).toBe(1); // polled status, did not refund twice
   });
 });

@@ -14,7 +14,10 @@ export interface HeldBooking {
   userId: string;
   eventId: string;
   bookingId: string;
+  /** Grand total charged (tickets + platform fee + VAT). */
   totalMinor: number;
+  /** Ticket price part of the total (what a policy refund returns by default). */
+  ticketMinor: number;
 }
 
 /** A customer with a fresh HELD booking of `seats` seats (default event 30 days out). */
@@ -36,6 +39,7 @@ export async function heldBooking(
     eventId,
     bookingId: held.body.data.id,
     totalMinor: held.body.data.totalAmountMinor,
+    ticketMinor: held.body.data.charges.ticketSubtotalMinor,
   };
 }
 

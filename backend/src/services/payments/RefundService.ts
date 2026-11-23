@@ -5,6 +5,7 @@ import {
   type RefundPaymentResult,
 } from '../../domain/payments/PaymentGateway';
 import { refundRetryDelayMs } from '../../domain/payments/paymentRules';
+import type { RefundComponents } from '../../domain/pricing/charges';
 import type { Queryable, TransactionRunner } from '../../infrastructure/database/types';
 import type {
   PaymentRecord,
@@ -16,6 +17,10 @@ export interface RefundDto {
   id: string;
   status: RefundRecord['status'];
   amountMinor: number;
+  /** Split of amountMinor: refunded ticket price, platform fee and VAT. */
+  ticketMinor: number;
+  platformFeeMinor: number;
+  vatMinor: number;
   currency: string;
   attempt: number;
   reason: string | null;
@@ -30,6 +35,9 @@ export function toRefundDto(refund: RefundRecord): RefundDto {
     id: refund.id,
     status: refund.status,
     amountMinor: refund.amountMinor,
+    ticketMinor: refund.ticketMinor,
+    platformFeeMinor: refund.platformFeeMinor,
+    vatMinor: refund.vatMinor,
     currency: refund.currency,
     attempt: refund.attempt,
     reason: refund.reason,
@@ -61,15 +69,24 @@ export class RefundService {
   async createWithin(
     tx: Queryable,
     payment: PaymentRecord,
-    params: { amountMinor: number; reason: string },
+    params: { components: RefundComponents; reason: string },
   ): Promise<RefundRecord> {
+    const { ticketMinor, platformFeeMinor, vatMinor, totalMinor } = params.components;
+    if (
+      [ticketMinor, platformFeeMinor, vatMinor].some((v) => !Number.isSafeInteger(v) || v < 0) ||
+      totalMinor !== ticketMinor + platformFeeMinor + vatMinor ||
+      totalMinor <= 0 ||
+      totalMinor > payment.amountMinor
+    ) {
+      throw new Error('Refund components are inconsistent with the payment');
+    }
     const latest = await this.payments.latestRefund(payment.id, tx);
     if (latest && latest.status !== 'FAILED') return latest; // live or already refunded
     const attempt = (latest?.attempt ?? 0) + 1;
     const refund = await this.payments.createRefund(tx, {
       bookingId: payment.bookingId,
       paymentId: payment.id,
-      amountMinor: params.amountMinor,
+      components: params.components,
       currency: payment.currency,
       attempt,
       idempotencyKey: `refund_${payment.transactionRef}_${attempt}`,
@@ -150,8 +167,14 @@ export class RefundService {
       if (!latest) return null;
       if (latest.status !== 'FAILED') return latest;
       if (latest.attempt >= this.options.maxAttempts) return latest;
+      // The retry returns exactly the same components as the failed attempt.
       return this.createWithin(tx, payment, {
-        amountMinor: latest.amountMinor,
+        components: {
+          ticketMinor: latest.ticketMinor,
+          platformFeeMinor: latest.platformFeeMinor,
+          vatMinor: latest.vatMinor,
+          totalMinor: latest.amountMinor,
+        },
         reason: latest.reason ?? 'Retry',
       });
     });

@@ -8,6 +8,7 @@ import { validate } from '../middlewares/validate';
 import {
   adminUsersQuerySchema,
   eventBookingsQuerySchema,
+  financeQuerySchema,
   notificationListSchema,
 } from '../schemas/dashboard.schemas';
 import { idParamsSchema } from '../schemas/event.schemas';
@@ -54,5 +55,6 @@ export function createAdminRouter(
   router.get('/overview', controller.admin);
   router.get('/users', validate({ query: adminUsersQuerySchema }), controller.adminUsers);
   router.get('/diagnostics/request', controller.requestDiagnostics);
+  router.get('/finance', validate({ query: financeQuerySchema }), controller.adminFinance);
   return router;
 }

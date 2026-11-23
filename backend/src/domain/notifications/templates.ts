@@ -9,11 +9,21 @@ export interface BookingNotificationFacts {
   venueName: string;
   venueCity: string;
   seats: { row: string; number: number; category: string }[];
+  /** Grand total paid = ticket subtotal + platform fee + VAT. */
   totalAmountMinor: number;
   currency: string;
+  /** Booking price breakdown snapshot (zero fee/VAT for bookings made before fees existed). */
+  ticketSubtotalMinor?: number;
+  platformFeeMinor?: number;
+  platformFeePerSeatMinor?: number;
+  vatMinor?: number;
+  vatRateBps?: number;
   /** Cancellation only. */
   refundAmountMinor?: number;
   refundable?: boolean;
+  /** Cancellation only: platform fee / VAT included in the refund. */
+  refundPlatformFeeMinor?: number;
+  refundVatMinor?: number;
 }
 
 export interface RenderedNotification {
@@ -35,6 +45,29 @@ function formatWhen(date: Date, timezone: string): string {
   } catch {
     return date.toISOString();
   }
+}
+
+/** "2%" / "7.5%" from basis points, without floating-point noise. */
+export function formatRate(bps: number): string {
+  const whole = Math.floor(bps / 100);
+  const fraction = bps % 100;
+  return fraction === 0
+    ? `${whole}%`
+    : `${whole}.${String(fraction).padStart(2, '0').replace(/0$/, '')}%`;
+}
+
+/** Receipt lines: tickets, platform charge, VAT and total, each labelled. */
+function chargeLines(facts: BookingNotificationFacts): string[] {
+  const money = (minor: number) => formatAmount(minor, facts.currency);
+  const fee = facts.platformFeeMinor ?? 0;
+  const vat = facts.vatMinor ?? 0;
+  if (fee === 0 && vat === 0) return [`Amount paid: ${money(facts.totalAmountMinor)}`];
+  return [
+    `Tickets (${facts.seats.length} seat(s)): ${money(facts.ticketSubtotalMinor ?? facts.totalAmountMinor - fee - vat)}`,
+    `Platform charge (${money(facts.platformFeePerSeatMinor ?? 0)} per seat): ${money(fee)}`,
+    `VAT (${formatRate(facts.vatRateBps ?? 0)} of ticket price): ${money(vat)}`,
+    `Total paid: ${money(facts.totalAmountMinor)}`,
+  ];
 }
 
 function seatList(facts: BookingNotificationFacts): string {
@@ -73,17 +106,23 @@ export function renderNotification(
         `When: ${when}`,
         `Where: ${where}`,
         `Seats: ${seatList(facts)}`,
-        `Amount paid: ${total}`,
+        ...chargeLines(facts),
         '',
-        'Cancellations more than 24 hours before the event are fully refunded.',
+        'Cancellations more than 24 hours before the event get the ticket price back.',
       ].join('\n'),
     };
   }
 
   if (type === 'BOOKING_CANCELLED') {
+    const keptFee = (facts.platformFeeMinor ?? 0) - (facts.refundPlatformFeeMinor ?? 0);
+    const keptVat = (facts.vatMinor ?? 0) - (facts.refundVatMinor ?? 0);
+    const kept =
+      keptFee > 0 || keptVat > 0
+        ? ` The platform charge (${formatAmount(keptFee, facts.currency)}) and VAT (${formatAmount(keptVat, facts.currency)}) are not refundable.`
+        : '';
     const refund =
       facts.refundable && facts.refundAmountMinor
-        ? `A full refund of ${formatAmount(facts.refundAmountMinor, facts.currency)} is on its way to your original payment method.`
+        ? `A refund of ${formatAmount(facts.refundAmountMinor, facts.currency)} (full ticket price) is on its way to your original payment method.${kept}`
         : facts.refundAmountMinor === undefined
           ? 'No payment was taken for this booking.'
           : 'No refund applies (cancelled within 24 hours of the event or nothing was paid).';

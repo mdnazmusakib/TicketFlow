@@ -62,6 +62,9 @@ flowchart LR
 3. Confirmation only after **server-side verification** (signed webhook / IPN **and** provider validation API), amount and currency matched, inside a transaction that re-checks owner, state and `hold_expires_at > now()`.
 4. Late or duplicate captures are recorded and refunded automatically; unknown outcomes are reconciled by the worker.
 
+### 4.2b Price breakdown (platform fee and VAT)
+`buildQuote` (pricing strategy) → `computeCharges` (fee per seat, VAT half-up) → booking row stores ticket subtotal, fee, VAT and the rates → payment charges the grand total → refunds split ticket/fee/VAT → `DashboardRepository.financeSummary` and organizer `eventSales` report them separately (VAT never counted as revenue).
+
 ### 4.3 Cancellation and refund
 Lock booking → verify any open attempt first → decide refund (`> 24 h` before start: full, else none) → `CANCELLED`, seats `RELEASED`, refund row, history, cancellation notifications in one transaction → provider refund after commit, retried with backoff (`refund_trans_id` derived from the attempt's idempotency key).
 

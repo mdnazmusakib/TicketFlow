@@ -22,6 +22,8 @@ export async function setupPublishedEvent(
     seatsPerRow?: number;
     pricing?: Record<string, unknown>;
     startInDays?: number;
+    /** Price of the single "General" category when rows = 1 (default 1,000.00). */
+    generalPriceMinor?: number;
   } = {},
 ): Promise<EventSetup> {
   const { agent: organizer } = await signUp(h, 'ORGANIZER');
@@ -43,7 +45,7 @@ export async function setupPublishedEvent(
         seatsPerRow: options.seatsPerRow ?? 5,
         categories:
           rows === 1
-            ? [{ name: 'General', priceMinor: 100000, rows: ['A'] }]
+            ? [{ name: 'General', priceMinor: options.generalPriceMinor ?? 100000, rows: ['A'] }]
             : [
                 { name: 'VIP', priceMinor: 200000, rows: ['A'] },
                 { name: 'Regular', priceMinor: 100000, rows: labels.slice(1) },

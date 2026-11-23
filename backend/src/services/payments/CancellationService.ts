@@ -5,6 +5,11 @@ import {
   isOpenPayment,
   type RefundDecision,
 } from '../../domain/payments/paymentRules';
+import {
+  cancellationRefund,
+  type RefundComponentPolicy,
+  type RefundComponents,
+} from '../../domain/pricing/charges';
 import type { Queryable, TransactionRunner } from '../../infrastructure/database/types';
 import type { BookingRepository } from '../../repositories/BookingRepository';
 import type { PaymentRepository } from '../../repositories/PaymentRepository';
@@ -19,7 +24,18 @@ export interface CancellationPreview extends RefundDecision {
   paidAmountMinor: number;
   currency: string;
   cancellable: boolean;
+  /** What would be returned, split into ticket price, platform fee and VAT (all 0 if none). */
+  refundComponents: RefundComponents;
+  /** Charges kept even when the cancellation is refundable (per REFUND_PLATFORM_FEE / REFUND_VAT). */
+  nonRefundable: { platformFeeMinor: number; vatMinor: number };
 }
+
+const NO_REFUND: RefundComponents = {
+  ticketMinor: 0,
+  platformFeeMinor: 0,
+  vatMinor: 0,
+  totalMinor: 0,
+};
 
 /**
  * Customer cancellation (PRD §3.11):
@@ -39,11 +55,27 @@ export class CancellationService {
     private readonly lifecycle: BookingLifecycle,
     private readonly paymentService: PaymentService,
     private readonly refunds: RefundService,
-    private readonly options: { now?: () => Date; logger?: Logger } = {},
+    private readonly options: {
+      now?: () => Date;
+      logger?: Logger;
+      /** Which booking charges an eligible cancellation returns besides the ticket price. */
+      refundPolicy?: RefundComponentPolicy;
+    } = {},
   ) {}
 
   private now(): Date {
     return this.options.now?.() ?? new Date();
+  }
+
+  /** Refundable components of a paid booking under the configured policy (never above the payment). */
+  private refundable(
+    booking: { charges: Parameters<typeof cancellationRefund>[0] },
+    paidMinor: number,
+  ): RefundComponents {
+    if (paidMinor <= 0) return NO_REFUND;
+    const policy = this.options.refundPolicy ?? { refundPlatformFee: false, refundVat: false };
+    const components = cancellationRefund(booking.charges, policy);
+    return components.totalMinor <= paidMinor ? components : NO_REFUND;
   }
 
   async preview(actor: Actor, bookingId: string): Promise<CancellationPreview> {
@@ -54,17 +86,26 @@ export class CancellationService {
       booking.status === 'CONFIRMED'
         ? await this.payments.findSucceededForBooking(bookingId)
         : null;
+    const components = this.refundable(booking, paid?.amountMinor ?? 0);
     const decision = decideRefund({
       eventStartAt: startAt,
       now: this.now(),
-      paidAmountMinor: paid?.amountMinor ?? 0,
+      paidAmountMinor: components.totalMinor,
     });
+    const refundComponents = decision.refundable ? components : NO_REFUND;
     return {
       ...decision,
       bookingStatus: booking.status,
       paidAmountMinor: paid?.amountMinor ?? 0,
       currency: booking.currency,
       cancellable: ['HELD', 'PENDING_PAYMENT', 'CONFIRMED'].includes(booking.status),
+      refundComponents,
+      nonRefundable: decision.refundable
+        ? {
+            platformFeeMinor: booking.charges.platformFeeMinor - components.platformFeeMinor,
+            vatMinor: booking.charges.vatMinor - components.vatMinor,
+          }
+        : { platformFeeMinor: 0, vatMinor: 0 },
     };
   }
 
@@ -119,17 +160,23 @@ export class CancellationService {
       }
 
       const paid = await this.payments.findSucceededForBooking(bookingId, tx);
+      const components = this.refundable(booking, paid?.amountMinor ?? 0);
       const decision = decideRefund({
         eventStartAt: startAt,
         now,
-        paidAmountMinor: paid?.amountMinor ?? 0,
+        paidAmountMinor: components.totalMinor,
       });
       await this.lifecycle.transition(tx, booking, 'CANCELLED', {
         reason: decision.refundable
           ? 'cancelled by customer (full refund)'
           : 'cancelled by customer (no refund)',
         actorId: actor.id,
-        details: { refundable: decision.refundable, refundAmountMinor: decision.refundAmountMinor },
+        details: {
+          refundable: decision.refundable,
+          refundAmountMinor: decision.refundAmountMinor,
+          refundPlatformFeeMinor: decision.refundable ? components.platformFeeMinor : 0,
+          refundVatMinor: decision.refundable ? components.vatMinor : 0,
+        },
         cancellationReason:
           reason ??
           (decision.refundable
@@ -139,7 +186,7 @@ export class CancellationService {
       let refundId: string | null = null;
       if (decision.refundable && paid) {
         const refund = await this.refunds.createWithin(tx, paid, {
-          amountMinor: decision.refundAmountMinor,
+          components,
           reason: 'Customer cancellation more than 24 hours before the event',
         });
         refundId = refund.id;

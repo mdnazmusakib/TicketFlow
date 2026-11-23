@@ -23,14 +23,25 @@ export interface SeatForPricing {
   basePriceMinor: number;
 }
 
+/** Immutable financial snapshot stored with the booking (migration 0009). */
+export interface BookingCharges {
+  ticketSubtotalMinor: number;
+  platformFeeMinor: number;
+  platformFeePerSeatMinor: number;
+  vatMinor: number;
+  vatRateBps: number;
+}
+
 export interface BookingCore {
   id: string;
   eventId: string;
   customerId: string;
   status: BookingStatus;
   holdExpiresAt: Date | null;
+  /** Grand total charged = ticket subtotal + platform fee + VAT. */
   totalAmountMinor: number;
   currency: string;
+  charges: BookingCharges;
 }
 
 export interface BookingSeatView {
@@ -78,6 +89,7 @@ export interface NewBooking {
   totalAmountMinor: number;
   currency: string;
   idempotencyKey: string | null;
+  charges: BookingCharges;
 }
 
 interface CoreRow {
@@ -88,6 +100,11 @@ interface CoreRow {
   hold_expires_at: Date | null;
   total_amount_minor: string;
   currency: string;
+  ticket_subtotal_minor: string;
+  platform_fee_minor: string;
+  platform_fee_per_seat_minor: string;
+  vat_minor: string;
+  vat_rate_bps: number;
 }
 
 const toCore = (row: CoreRow): BookingCore => ({
@@ -98,10 +115,18 @@ const toCore = (row: CoreRow): BookingCore => ({
   holdExpiresAt: row.hold_expires_at,
   totalAmountMinor: Number(row.total_amount_minor),
   currency: row.currency,
+  charges: {
+    ticketSubtotalMinor: Number(row.ticket_subtotal_minor),
+    platformFeeMinor: Number(row.platform_fee_minor),
+    platformFeePerSeatMinor: Number(row.platform_fee_per_seat_minor),
+    vatMinor: Number(row.vat_minor),
+    vatRateBps: Number(row.vat_rate_bps),
+  },
 });
 
 const CORE_COLUMNS =
-  'b.id, b.event_id, b.customer_id, b.status, b.hold_expires_at, b.total_amount_minor, b.currency';
+  'b.id, b.event_id, b.customer_id, b.status, b.hold_expires_at, b.total_amount_minor, b.currency, ' +
+  'b.ticket_subtotal_minor, b.platform_fee_minor, b.platform_fee_per_seat_minor, b.vat_minor, b.vat_rate_bps';
 
 export class BookingRepository {
   constructor(private readonly db: Queryable) {}
@@ -223,8 +248,9 @@ export class BookingRepository {
   async insertBooking(tx: Queryable, booking: NewBooking): Promise<Date> {
     const { rows } = await tx.query<{ hold_expires_at: Date }>(
       `INSERT INTO bookings (id, event_id, customer_id, status, hold_expires_at, pricing_strategy,
-         total_amount_minor, currency, idempotency_key)
-       VALUES ($1, $2, $3, 'HELD', now() + make_interval(secs => $4), $5, $6, $7, $8)
+         total_amount_minor, currency, idempotency_key, ticket_subtotal_minor, platform_fee_minor,
+         platform_fee_per_seat_minor, vat_minor, vat_rate_bps)
+       VALUES ($1, $2, $3, 'HELD', now() + make_interval(secs => $4), $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING hold_expires_at`,
       [
         booking.id,
@@ -235,6 +261,11 @@ export class BookingRepository {
         booking.totalAmountMinor,
         booking.currency,
         booking.idempotencyKey,
+        booking.charges.ticketSubtotalMinor,
+        booking.charges.platformFeeMinor,
+        booking.charges.platformFeePerSeatMinor,
+        booking.charges.vatMinor,
+        booking.charges.vatRateBps,
       ],
     );
     return rows[0]!.hold_expires_at;

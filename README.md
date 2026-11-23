@@ -11,7 +11,8 @@ Event ticket booking platform (in the spirit of Ticketmaster / BookMyShow). Orga
 - **Discovery**: search by name/venue, city, date range, sorting and pagination; live seat availability.
 - **Booking**: 5-minute seat holds (Redis locks + PostgreSQL partial unique index, zero double booking), 6-ticket limit per user per event, strict lifecycle `HELD → PENDING_PAYMENT → CONFIRMED | EXPIRED | CANCELLED` with full history, automatic expiry.
 - **Payments**: one `PaymentGateway` interface with Mock Provider A (hosted page + signed webhook), Mock Provider B (tokens) and **SSLCommerz**; idempotent (no double charge on retry), server-side verification before confirmation, reconciliation of unknown outcomes.
-- **Cancellation & refunds**: full refund when cancelled more than 24 hours before the start, otherwise none; refunds retried with backoff.
+- **Platform fee & VAT**: BDT 10 platform charge per seat and 2% VAT on the ticket price (both configurable), shown as a transparent breakdown at checkout, on the booking/receipt and in emails; every booking stores an immutable price snapshot.
+- **Cancellation & refunds**: the ticket price is refunded when cancelled more than 24 hours before the start, otherwise nothing; platform charge and VAT are refundable only if configured; refunds record ticket, fee and VAT separately and are retried with backoff.
 - **Notifications**: Email + In-App on confirmation and cancellation, and a reminder at least 1 hour before the event; transactional outbox with retries, no duplicates.
 - **Dashboards**: customer (bookings, payments, refunds, notifications), organizer (revenue, occupancy, bookings by status), admin (platform totals, notification delivery, user directory).
 - **Security**: Zod validation, RBAC + ownership checks (IDOR-safe 404s), Redis-backed rate limits, strict CORS, Helmet/CSP, redacted logs, production config guards. Details: [ALGORITHMS_AND_SECURITY.md](ALGORITHMS_AND_SECURITY.md).
@@ -140,6 +141,10 @@ Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(4
 | `FRONTEND_DIST_DIR` | no | Optional: let the API also serve the built web app from one origin (used by the E2E stack; not needed with Vercel) |
 | `PAYMENT_HOLD_EXTENSION_SECONDS` | no (900) | Seats stay held this long once payment starts |
 | `REFUND_MAX_ATTEMPTS` | no (5) | Refund attempts before giving up |
+| `PLATFORM_FEE_PER_SEAT_MINOR` | no (1000) | Platform charge per booked seat in paisa (1000 = BDT 10); TicketFlow revenue |
+| `VAT_RATE_BPS` | no (200) | VAT on the ticket subtotal in basis points (200 = 2%); a configurable business rule, not legal advice |
+| `REFUND_PLATFORM_FEE` | no (false) | Return the platform charge on an eligible (> 24 h) cancellation |
+| `REFUND_VAT` | no (false) | Return the VAT on an eligible cancellation (confirm the correct treatment with a tax adviser) |
 | `ENABLE_MOCK_PAYMENTS` | no (true outside production) | Mock Provider A and B |
 | `MOCK_PAYMENT_WEBHOOK_SECRET` | production with mocks | HMAC secret for mock webhooks (derived automatically in development) |
 | `SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWORD` | for SSLCommerz | Sandbox or live store credentials (never committed) |
@@ -193,6 +198,13 @@ The server validates every variable at startup and exits listing invalid variabl
 - Production: `EMAIL_TRANSPORT=smtp` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`. The API refuses to start with console email in production (config check plus a second guard in the container), so OTPs can never end up in production logs.
 - In-app notifications do not depend on email: each channel is a separate outbox row, so a failing mail server leaves the in-app notification delivered and the email retried with backoff.
 
+### Platform fee and VAT
+- Formula (integer paisa, server-side only): `ticket subtotal = Σ seat prices (after early-bird)`, `platform fee = PLATFORM_FEE_PER_SEAT_MINOR × seats`, `VAT = round_half_up(ticket subtotal × VAT_RATE_BPS / 10000)`, `grand total = subtotal + fee + VAT`. Example: 3 seats at BDT 500 → 1,500 + 30 + 30 = **BDT 1,560**; 1 seat at BDT 500 → **BDT 520**.
+- The breakdown is stored on each booking when the seats are held (`ticket_subtotal_minor`, `platform_fee_minor`, `vat_minor` and the rates used) and can never change afterwards; client-sent amounts are rejected (strict schemas) and payments must match the stored grand total exactly.
+- Refunds: an eligible cancellation returns the ticket price; the platform charge and VAT stay unless `REFUND_PLATFORM_FEE` / `REFUND_VAT` are enabled. Late or duplicate captures are refunded in full. Each refund stores ticket, fee and VAT amounts separately.
+- Reports: `GET /api/admin/finance?from=YYYY-MM-DD&to=YYYY-MM-DD` (ADMIN) and the **Finance** card on `/admin` show platform revenue (fees − refunded fees), VAT as a separate tax liability, ticket sales and customer payments. Organizer dashboards count ticket sales only and show platform charges + VAT as "not your earnings". There is no organizer payout module yet; net ticket sales are the basis for any settlement.
+- Compliance: the 2% VAT is a configurable business setting. TicketFlow does not claim to be VAT-compliant for any event category in Bangladesh; review the rate, invoicing and refund treatment with a tax professional before relying on it.
+
 ### Event search dates
 `GET /api/events` accepts `from` / `to` as a real calendar date `YYYY-MM-DD` (UTC day; `to` includes that whole day) or an ISO 8601 date-time with a time zone (`2027-01-01T10:00:00+06:00`). Impossible dates (`2026-13-40`, `2026-02-30`, `2027-02-29`), other formats, and `from` after `to` return `400 VALIDATION_ERROR` before any database query; database date errors are also mapped to 400, never 500.
 
@@ -231,6 +243,7 @@ The server validates every variable at startup and exits listing invalid variabl
 | POST | `/api/auth/resend-otp` | `{ email }` → always 202 (no account enumeration) |
 | POST | `/api/auth/login` / `/api/auth/logout` | Cookie session start / server-side revocation |
 | GET | `/api/auth/me` | Current user |
+| GET | `/api/admin/finance` | ADMIN: platform revenue, VAT liability, ticket sales, payments and refunds for an optional `from`/`to` date range |
 | GET | `/api/events` | Public list: `q, city, from, to (YYYY-MM-DD), sort=date|price|title|newest, order, page, pageSize` |
 | GET | `/api/events/cities` · `/api/events/:id` · `/api/events/:id/seats` | Cities, details with categories, seat availability |
 | POST | `/api/bookings/quote` | `{ eventId, seatIds }` → server-side price (strategy, discounts, total) |

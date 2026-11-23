@@ -52,7 +52,7 @@ export function CancelBooking({
       setMessage({
         tone: 'success',
         text: decision?.refundable
-          ? `Booking cancelled. A full refund of ${formatMoney(decision.refundAmountMinor, updated.currency)} has been requested.`
+          ? `Booking cancelled. A refund of ${formatMoney(decision.refundAmountMinor, updated.currency)} (full ticket price) has been requested.`
           : 'Booking cancelled and seats released.',
       });
     } catch (error) {
@@ -79,9 +79,20 @@ export function CancelBooking({
                 <p>
                   The event is more than 24 hours away, so you will get a{' '}
                   <strong>
-                    full refund of {formatMoney(preview.refundAmountMinor, preview.currency)}
+                    full refund of the ticket price:{' '}
+                    {formatMoney(preview.refundAmountMinor, preview.currency)}
                   </strong>
                   .
+                  {(preview.nonRefundable.platformFeeMinor > 0 ||
+                    preview.nonRefundable.vatMinor > 0) && (
+                    <>
+                      {' '}
+                      The platform charge (
+                      {formatMoney(preview.nonRefundable.platformFeeMinor, preview.currency)}) and
+                      VAT ({formatMoney(preview.nonRefundable.vatMinor, preview.currency)}) are not
+                      refundable.
+                    </>
+                  )}
                 </p>
               ) : (
                 <p>

@@ -239,20 +239,24 @@ describe('Notifications: outbox delivery, reminders and in-app inbox', () => {
 
   describe('cancellation', () => {
     it('notifies a paid cancellation with the refund outcome', async () => {
-      const { agent, bookingId, userId, totalMinor } = await confirmedBooking(h, {
+      const { agent, bookingId, userId, totalMinor, ticketMinor } = await confirmedBooking(h, {
         startInDays: 10,
       });
       await agent.post(`/api/bookings/${bookingId}/cancel`).expect(200);
       const rows = await rowsFor(bookingId, 'BOOKING_CANCELLED');
       expect(rows.map((r) => r.channel)).toEqual(['EMAIL', 'IN_APP']);
-      expect(rows[0]!.message).toMatch(/full refund/i);
+      expect(rows[0]!.message).toMatch(/full ticket price/i);
       await drain();
       const email = await emailOf(userId);
       const cancelled = h.emails.sent.find(
         (m) => m.to === email && m.subject.startsWith('Booking cancelled'),
       );
+      const money = (minor: number) =>
+        `BDT ${(minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+      expect(cancelled?.text).toContain(`A refund of ${money(ticketMinor)} (full ticket price)`);
+      // The kept platform charge and VAT are named explicitly.
       expect(cancelled?.text).toContain(
-        `A full refund of BDT ${(totalMinor / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+        `The platform charge (${money(1000)}) and VAT (${money(totalMinor - ticketMinor - 1000)}) are not refundable.`,
       );
       const inbox = await agent.get('/api/notifications').expect(200);
       expect(inbox.body.data.map((n: { type: string }) => n.type)).toEqual([

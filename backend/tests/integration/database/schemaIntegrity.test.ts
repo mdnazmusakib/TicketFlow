@@ -215,8 +215,9 @@ describe('schema integrity (real PostgreSQL)', () => {
     it('requires new bookings to start in HELD', async () => {
       const failure = await pgFailure(
         testDb.pool.query(
-          `INSERT INTO bookings (event_id, customer_id, status, confirmed_at, pricing_strategy, total_amount_minor, currency)
-           VALUES ($1, $2, 'CONFIRMED', now(), 'BASE', 1000, 'BDT')`,
+          `INSERT INTO bookings (event_id, customer_id, status, confirmed_at, pricing_strategy, total_amount_minor,
+             ticket_subtotal_minor, currency)
+           VALUES ($1, $2, 'CONFIRMED', now(), 'BASE', 1000, 1000, 'BDT')`,
           [fx.eventId, customerId],
         ),
       );
@@ -344,8 +345,8 @@ describe('schema integrity (real PostgreSQL)', () => {
       const payment = await insertPayment(bookingId, `r-${bookingId}`, 'SUCCEEDED');
       const refund = (key: string, status: string, attempt: number) =>
         testDb.pool.query(
-          `INSERT INTO refunds (booking_id, payment_id, amount_minor, currency, status, idempotency_key, attempt, processed_at)
-           VALUES ($1, $2, 100000, 'BDT', $3::varchar, $4, $5, CASE WHEN $3::varchar IN ('SUCCEEDED','FAILED') THEN now() END)`,
+          `INSERT INTO refunds (booking_id, payment_id, amount_minor, ticket_minor, currency, status, idempotency_key, attempt, processed_at)
+           VALUES ($1, $2, 100000, 100000, 'BDT', $3::varchar, $4, $5, CASE WHEN $3::varchar IN ('SUCCEEDED','FAILED') THEN now() END)`,
           [bookingId, payment.rows[0]!.id, status, key, attempt],
         );
       await refund(`rf-${bookingId}-1`, 'FAILED', 1);

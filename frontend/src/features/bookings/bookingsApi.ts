@@ -17,10 +17,29 @@ export interface QuoteLine {
 export interface Quote {
   currency: string;
   appliedStrategy: string;
+  /** Catalogue prices before discounts. */
   subtotalMinor: number;
   discountMinor: number;
+  /** Ticket prices after discounts. */
+  ticketTotalMinor: number;
+  platformFeePerSeatMinor: number;
+  platformFeeMinor: number;
+  vatRateBps: number;
+  vatMinor: number;
+  /** Grand total = tickets + platform charge + VAT. */
   totalMinor: number;
   lines: QuoteLine[];
+}
+
+/** Price breakdown frozen on the booking when the seats were held. */
+export interface BookingCharges {
+  seatCount: number;
+  ticketSubtotalMinor: number;
+  platformFeePerSeatMinor: number;
+  platformFeeMinor: number;
+  vatRateBps: number;
+  vatMinor: number;
+  grandTotalMinor: number;
 }
 
 export type PaymentProvider = 'MOCK_PROVIDER_A' | 'MOCK_PROVIDER_B' | 'SSLCOMMERZ';
@@ -44,6 +63,9 @@ export interface Refund {
   id: string;
   status: 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
   amountMinor: number;
+  ticketMinor: number;
+  platformFeeMinor: number;
+  vatMinor: number;
   currency: string;
   attempt: number;
   reason: string | null;
@@ -64,6 +86,13 @@ export interface CancellationPreview extends RefundDecision {
   paidAmountMinor: number;
   currency: string;
   cancellable: boolean;
+  refundComponents: {
+    ticketMinor: number;
+    platformFeeMinor: number;
+    vatMinor: number;
+    totalMinor: number;
+  };
+  nonRefundable: { platformFeeMinor: number; vatMinor: number };
 }
 
 export interface PaymentResult {
@@ -81,6 +110,7 @@ export interface Booking {
   totalAmountMinor: number;
   refundAmountMinor: number;
   currency: string;
+  charges: BookingCharges;
   seats: {
     seatId: string;
     row: string;

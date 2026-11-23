@@ -2,7 +2,7 @@
 
 **Database:** Supabase PostgreSQL (verified on PostgreSQL 17; tests also run on 18)
 **Ephemeral store:** Redis (seat-hold locks, OTP TTLs, counters)
-**Source of truth for the schema:** `backend/db/migrations/0001…0008` (this document and the migrations must stay identical; any change ships as a new migration plus an update here)
+**Source of truth for the schema:** `backend/db/migrations/0001…0009` (this document and the migrations must stay identical; any change ships as a new migration plus an update here)
 **Money:** integer minor units (`BIGINT`, paisa for BDT), always stored with a 3-letter `currency`.
 **Time:** all instants are `TIMESTAMPTZ` (UTC); venues keep an IANA `timezone` for display.
 
@@ -161,7 +161,12 @@ Decision: `seat_number` is an integer (not text) so seat maps sort and validate 
 | `status` | VARCHAR(20) | `HELD` (default) \| `PENDING_PAYMENT` \| `CONFIRMED` \| `EXPIRED` \| `CANCELLED` |
 | `hold_expires_at` | TIMESTAMPTZ | required while `HELD`/`PENDING_PAYMENT` (now + 300 s) |
 | `pricing_strategy` | VARCHAR(20) | snapshot of the strategy applied (`BASE`/`EARLY_BIRD`) |
-| `total_amount_minor` | BIGINT | `>= 0`, server-calculated, **immutable** |
+| `total_amount_minor` | BIGINT | `>= 0`, server-calculated, **immutable**; the amount charged = `ticket_subtotal_minor + platform_fee_minor + vat_minor` (`chk_bookings_charges`, 0009) |
+| `ticket_subtotal_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0`, **immutable** (0009): ticket prices after discounts |
+| `platform_fee_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0`, **immutable** (0009): platform charge (TicketFlow revenue) |
+| `platform_fee_per_seat_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0`, **immutable** (0009): fee rate snapshot |
+| `vat_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0`, **immutable** (0009): VAT on the ticket subtotal (tax liability) |
+| `vat_rate_bps` | INTEGER | NOT NULL DEFAULT 0, 0–10000, **immutable** (0009): VAT rate snapshot in basis points |
 | `refund_amount_minor` | BIGINT | DEFAULT 0, `0 <= refund <= total`, non-zero only when `CANCELLED` |
 | `currency` | CHAR(3) | immutable |
 | `idempotency_key` | VARCHAR(255) | nullable; unique per customer (`uq_bookings_customer_idempotency`, partial) |
@@ -256,6 +261,9 @@ The index cannot contain `now()`, so expiry is explicit: the expiry worker flips
 | `reason`, `failure_reason` | TEXT | |
 | `processed_at` | TIMESTAMPTZ | required for `SUCCEEDED`/`FAILED` |
 | `attempt` | SMALLINT | NOT NULL DEFAULT 1, 1–20, unique per payment (0007) |
+| `ticket_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0` (0009): refunded ticket price |
+| `platform_fee_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0` (0009): refunded platform charge |
+| `vat_minor` | BIGINT | NOT NULL DEFAULT 0, `>= 0` (0009): refunded VAT; `amount_minor = ticket_minor + platform_fee_minor + vat_minor` (`chk_refunds_components`) |
 | `next_retry_at` | TIMESTAMPTZ | nullable; when the refund worker retries this attempt (0007) |
 | `created_at`, `updated_at` | TIMESTAMPTZ | |
 
@@ -417,6 +425,13 @@ An open payment attempt is verified with the provider before cancelling (a compl
 Phase 5 `ReminderService`, run by the notification worker every `NOTIFICATION_WORKER_INTERVAL_MS`. One transaction selects `CONFIRMED` bookings with `reminder_sent_at IS NULL` of `PUBLISHED` events where `now() + 1 h <= start_at <= now() + REMINDER_WINDOW_MINUTES` (default 120), locked `FOR UPDATE OF b SKIP LOCKED`; for each it sets `reminder_sent_at` and inserts the Email + In-App `EVENT_REMINDER_1H` rows. Result: a reminder always arrives at least 1 hour before the start; parallel or restarted workers never schedule it twice (row lock + marker + dedupe key); a booking with less than 1 hour left is not reminded; a queued reminder whose event has started by delivery time is marked `SKIPPED` instead of sent.
 
 ---
+
+### 5.8 Platform fee, VAT and financial snapshot (migration 0009)
+
+- At hold time the server prices the seats (pricing strategy) and adds `platform_fee_minor = PLATFORM_FEE_PER_SEAT_MINOR × seats` (default BDT 10 per seat) and `vat_minor = round_half_up(ticket_subtotal_minor × VAT_RATE_BPS / 10000)` (default 2%), all in integer paisa. The whole breakdown, including the fee and rate used, is stored on the booking and is immutable (trigger `enforce_booking_status_transition` + `chk_bookings_charges`), so later price or rate changes never alter a booking. Bookings created before 0009 were backfilled with `ticket_subtotal_minor = total_amount_minor` and zero fee/VAT.
+- Payments always charge `total_amount_minor` (the grand total); provider verification must report exactly that amount.
+- Refunds record the returned ticket price, platform fee and VAT separately. A customer cancellation more than 24 h before the event returns the ticket price; the platform fee and VAT are returned only when `REFUND_PLATFORM_FEE` / `REFUND_VAT` are enabled (default off). Captures that bought nothing (late or duplicate payments) are refunded in full, split by the booking's snapshot.
+- Reporting: platform revenue = platform fees − refunded platform fees; VAT liability = VAT − refunded VAT (never revenue); organizer ticket sales = ticket subtotals − refunded ticket amounts. Indexes `idx_payments_paid_at` and `idx_refunds_processed_at` support the dated admin finance report.
 
 ### 5.7 Organizer changes vs. active bookings (Phase 2)
 

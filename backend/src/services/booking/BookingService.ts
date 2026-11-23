@@ -3,7 +3,8 @@ import type { Logger } from 'pino';
 import type { Actor } from '../../domain/auth/roles';
 import type { BookingStatus } from '../../domain/lifecycle/bookingStateMachine';
 import type { PricingStrategyRegistry } from '../../domain/pricing/PricingStrategy';
-import { buildQuote, type Quote } from '../../domain/pricing/quote';
+import type { ChargePolicy } from '../../domain/pricing/charges';
+import { buildQuote, NO_CHARGES, type Quote } from '../../domain/pricing/quote';
 import type { Queryable, TransactionRunner } from '../../infrastructure/database/types';
 import type { Lock } from '../../infrastructure/redis/LockManager';
 import type {
@@ -32,6 +33,8 @@ export interface BookingFinancials {
 export interface BookingServiceOptions {
   maxTicketsPerUserPerEvent: number;
   holdTtlSeconds: number;
+  /** Platform fee per seat and VAT rate applied to new holds (snapshotted per booking). */
+  chargePolicy?: ChargePolicy;
   logger?: Logger;
   now?: () => Date;
   financials?: (bookingId: string) => Promise<BookingFinancials>;
@@ -68,6 +71,16 @@ export function toBookingDto(
     pricingStrategy: view.pricingStrategy,
     totalAmountMinor: view.totalAmountMinor,
     refundAmountMinor: view.refundAmountMinor,
+    /** Price breakdown frozen at hold time; later price or rate changes never alter it. */
+    charges: {
+      seatCount: view.seats.length,
+      ticketSubtotalMinor: view.charges.ticketSubtotalMinor,
+      platformFeePerSeatMinor: view.charges.platformFeePerSeatMinor,
+      platformFeeMinor: view.charges.platformFeeMinor,
+      vatRateBps: view.charges.vatRateBps,
+      vatMinor: view.charges.vatMinor,
+      grandTotalMinor: view.totalAmountMinor,
+    },
     currency: view.currency,
     seats: view.seats.map((seat) => ({
       seatId: seat.seatId,
@@ -111,6 +124,11 @@ function quoteDto(quote: Quote, unavailableSeatIds: string[]) {
     appliedStrategy: quote.appliedStrategy,
     subtotalMinor: quote.subtotalMinor,
     discountMinor: quote.discountMinor,
+    ticketTotalMinor: quote.ticketTotalMinor,
+    platformFeePerSeatMinor: quote.charges.platformFeePerSeatMinor,
+    platformFeeMinor: quote.charges.platformFeeMinor,
+    vatRateBps: quote.charges.vatRateBps,
+    vatMinor: quote.charges.vatMinor,
     totalMinor: quote.totalMinor,
     lines: quote.lines.map((line) => ({
       seatId: line.seatId,
@@ -148,6 +166,10 @@ export class BookingService {
     return this.options.now?.() ?? new Date();
   }
 
+  private chargePolicy(): ChargePolicy {
+    return this.options.chargePolicy ?? NO_CHARGES;
+  }
+
   /** Server-side price preview for a seat selection (no reservation). */
   async quote(eventId: string, seatIds: string[]) {
     const unique = this.normalizeSeats(seatIds);
@@ -159,7 +181,10 @@ export class BookingService {
     if (seats.length !== unique.length)
       throw new NotFoundError('One or more seats were not found in this event');
     const unavailable = await this.bookings.findUnavailableSeatIds(this.db, unique);
-    return quoteDto(buildQuote(this.pricing, event, seats, this.now()), unavailable);
+    return quoteDto(
+      buildQuote(this.pricing, event, seats, this.now(), this.chargePolicy()),
+      unavailable,
+    );
   }
 
   async hold(actor: Actor, input: HoldInput): Promise<{ booking: BookingDto; replayed: boolean }> {
@@ -213,7 +238,8 @@ export class BookingService {
         if (seats.length !== seatIds.length) {
           throw new NotFoundError('One or more seats were not found in this event');
         }
-        const quote = buildQuote(this.pricing, event, seats, this.now());
+        // Server-side pricing only: ticket prices from the catalogue, fee and VAT from config.
+        const quote = buildQuote(this.pricing, event, seats, this.now(), this.chargePolicy());
 
         const expiresAt = await this.bookings.insertBooking(tx, {
           id: bookingId,
@@ -224,6 +250,13 @@ export class BookingService {
           totalAmountMinor: quote.totalMinor,
           currency: quote.currency,
           idempotencyKey: input.idempotencyKey ?? null,
+          charges: {
+            ticketSubtotalMinor: quote.charges.ticketSubtotalMinor,
+            platformFeeMinor: quote.charges.platformFeeMinor,
+            platformFeePerSeatMinor: quote.charges.platformFeePerSeatMinor,
+            vatMinor: quote.charges.vatMinor,
+            vatRateBps: quote.charges.vatRateBps,
+          },
         });
         await this.bookings.insertBookingSeats(
           tx,
