@@ -3,7 +3,7 @@
 # Secrets (sync: false) are entered in the Render dashboard; nothing secret is committed.
 services:
   - type: web
-    name: ticketflow-api
+    name: ticketflow-dev
     runtime: node
     plan: free
     branch: main
@@ -20,9 +20,22 @@ services:
         value: production
       - key: LOG_LEVEL
         value: info
-      # Render's proxy + Vercel's proxy in front of the API.
+      # Proxy hops in front of the app (Cloudflare edge + Render load balancers). Live test:
+      # with 2, the rate-limit identity was the Cloudflare edge address (one shared counter per
+      # Cloudflare location), so the real client sits one hop further: 3. Confirm after deploy
+      # with GET /api/admin/diagnostics/request (README "Client IP and rate limits").
       - key: TRUST_PROXY
-        value: '2'
+        value: '3'
+      # Shared with the Vercel middleware (frontend/middleware.ts) to sign the client IP.
+      - key: TRUSTED_PROXY_SECRET
+        sync: false
+      # Set to 'true' only after the Vercel middleware is live: then only health checks,
+      # payment callbacks and /uploads accept direct (unsigned) requests.
+      - key: REQUIRE_TRUSTED_PROXY
+        value: 'false'
+      # Email OTP verification is optional for now (temporary product decision).
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: 'false'
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_SSL
@@ -59,7 +72,7 @@ services:
       # Demo deployment: keep the mock providers so reviewers can pay without real money.
       # Set to 'false' for a real launch (SSLCommerz only).
       - key: ENABLE_MOCK_PAYMENTS
-        value: 'true'
+        value: 'false'
       - key: MOCK_PAYMENT_WEBHOOK_SECRET
         generateValue: true
       - key: SSLCOMMERZ_STORE_ID

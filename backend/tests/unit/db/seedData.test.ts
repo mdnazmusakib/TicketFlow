@@ -5,7 +5,9 @@ import { loadMigrationFiles } from '../../../src/db/Migrator';
 describe('seed data', () => {
   it('provides demo organizer and customer accounts with unique emails', () => {
     const roles = DEMO_USERS.map((u) => u.role);
-    expect(roles).toEqual(expect.arrayContaining(['ORGANIZER', 'CUSTOMER', 'ADMIN']));
+    expect(roles).toEqual(expect.arrayContaining(['ORGANIZER', 'CUSTOMER']));
+    // Admins are never seeded with a repository-known password.
+    expect(roles).not.toContain('ADMIN');
     const emails = DEMO_USERS.map((u) => u.email.toLowerCase());
     expect(new Set(emails).size).toBe(emails.length);
     // Uses the reserved example.com domain so no real mailbox is ever contacted.

@@ -37,7 +37,27 @@ const envSchema = z
     CORS_ORIGINS: csvList.pipe(
       z.array(urlWithProtocols(['http:', 'https:'])).min(1, 'at least one origin is required'),
     ),
+    /**
+     * Number of reverse-proxy hops in front of the API whose X-Forwarded-For entries are
+     * trusted. Render: 1 (its edge appends the real connecting address). Never more than the
+     * real number of proxies, or clients can choose their own IP.
+     */
     TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
+    /** Secret shared with the edge proxy (Vercel middleware) to sign the client IP. */
+    TRUSTED_PROXY_SECRET: z.string().min(32, 'must be at least 32 characters').optional(),
+    /** Reject unsigned requests except health, payment callbacks and /uploads. */
+    REQUIRE_TRUSTED_PROXY: booleanString.default(false),
+    /**
+     * Optional header that the hosting edge ALWAYS overwrites with the connecting client IP
+     * (e.g. cf-connecting-ip behind Cloudflare). Only set it after confirming with
+     * GET /api/admin/diagnostics/request that clients cannot inject it.
+     */
+    CLIENT_IP_HEADER: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[a-z0-9-]{1,64}$/)
+      .optional(),
 
     DATABASE_URL: urlWithProtocols(['postgres:', 'postgresql:']),
     DATABASE_SSL: booleanString.default(true),
@@ -59,6 +79,11 @@ const envSchema = z
       .default('1h'),
     BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
     TEST_BYPASS_OTP: booleanString.default(false),
+    /**
+     * true: users must verify their email (OTP) before signing in. false (current default,
+     * temporary product decision): accounts work immediately; verification stays available.
+     */
+    REQUIRE_EMAIL_VERIFICATION: booleanString.default(false),
     AUTH_COOKIE_NAME: z
       .string()
       .regex(/^[A-Za-z0-9_-]{1,40}$/)
@@ -70,6 +95,11 @@ const envSchema = z
     OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
     OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(30),
+    /** Sign-in attempts allowed per account (any IP) per window before 429. */
+    LOGIN_MAX_ATTEMPTS_PER_EMAIL: z.coerce.number().int().min(1).max(100).default(5),
+    /** Sign-in attempts allowed per trusted client IP (any account) per window. */
+    LOGIN_MAX_ATTEMPTS_PER_IP: z.coerce.number().int().min(1).max(1000).default(20),
+    LOGIN_THROTTLE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(86400).default(900),
 
     EMAIL_TRANSPORT: z.enum(['console', 'smtp']).default('console'),
     EMAIL_FROM: z.string().min(3).default('TicketFlow <no-reply@ticketflow.local>'),
@@ -161,6 +191,13 @@ const envSchema = z
           'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required when STORAGE_DRIVER=supabase',
       });
     }
+    if (env.REQUIRE_TRUSTED_PROXY && !env.TRUSTED_PROXY_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TRUSTED_PROXY_SECRET'],
+        message: 'is required when REQUIRE_TRUSTED_PROXY=true',
+      });
+    }
     if (env.NODE_ENV !== 'production') return;
     if (env.EMAIL_TRANSPORT !== 'smtp') {
       ctx.addIssue({
@@ -237,6 +274,11 @@ export interface AppConfig {
   logLevel: ParsedEnv['LOG_LEVEL'];
   corsOrigins: string[];
   trustProxy: number;
+  trustedProxy: {
+    secret: string | undefined;
+    required: boolean;
+    clientIpHeader: string | undefined;
+  };
   database: {
     url: string;
     ssl: boolean;
@@ -254,10 +296,13 @@ export interface AppConfig {
     bcryptSaltRounds: number;
     /** OTP is bypassed when running tests or when explicitly enabled outside production. */
     otpBypass: boolean;
+    /** Sign-in and sessions require a verified email (REQUIRE_EMAIL_VERIFICATION). */
+    requireEmailVerification: boolean;
     otpTtlSeconds: number;
     otpMaxAttempts: number;
     otpResendCooldownSeconds: number;
     rateLimitMax: number;
+    loginThrottle: { maxPerEmail: number; maxPerIp: number; windowSeconds: number };
     cookie: {
       name: string;
       secure: boolean;
@@ -339,6 +384,11 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: env.LOG_LEVEL,
     corsOrigins: env.CORS_ORIGINS,
     trustProxy: env.TRUST_PROXY,
+    trustedProxy: {
+      secret: env.TRUSTED_PROXY_SECRET,
+      required: env.REQUIRE_TRUSTED_PROXY,
+      clientIpHeader: env.CLIENT_IP_HEADER,
+    },
     database: {
       url: env.DATABASE_URL,
       ssl: env.DATABASE_SSL,
@@ -356,10 +406,16 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       bcryptSaltRounds: env.BCRYPT_SALT_ROUNDS,
       // Never bypassed in production (TEST_BYPASS_OTP is rejected there as well).
       otpBypass: env.NODE_ENV !== 'production' && (isTest || env.TEST_BYPASS_OTP),
+      requireEmailVerification: env.REQUIRE_EMAIL_VERIFICATION,
       otpTtlSeconds: 300,
       otpMaxAttempts: env.OTP_MAX_ATTEMPTS,
       otpResendCooldownSeconds: env.OTP_RESEND_COOLDOWN_SECONDS,
       rateLimitMax: env.AUTH_RATE_LIMIT_MAX,
+      loginThrottle: {
+        maxPerEmail: env.LOGIN_MAX_ATTEMPTS_PER_EMAIL,
+        maxPerIp: env.LOGIN_MAX_ATTEMPTS_PER_IP,
+        windowSeconds: env.LOGIN_THROTTLE_WINDOW_SECONDS,
+      },
       cookie: {
         name: env.AUTH_COOKIE_NAME,
         secure: env.COOKIE_SECURE ?? env.NODE_ENV === 'production',

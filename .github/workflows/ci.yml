@@ -34,6 +34,8 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run build
+      - name: No public credentials in the web app source or build
+        run: npm run check:credentials
       - name: No secrets committed
         run: |
           if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$'; then

@@ -342,3 +342,26 @@ describe('Auth context, account page and header', () => {
     await waitFor(() => expect(auth.me).toHaveBeenCalled());
   });
 });
+
+describe('Account page email verification notice', () => {
+  it('offers optional verification to unverified users only', async () => {
+    renderRoute(<AccountPage api={fakeDashboardApi()} />, {
+      path: '/account',
+      auth: fakeAuthApi({ ...customerUser, emailVerified: false }),
+    });
+    expect(await screen.findByText('Not verified')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Verify email' })).toHaveAttribute(
+      'href',
+      `/verify-email?email=${encodeURIComponent(customerUser.email)}`,
+    );
+  });
+
+  it('shows nothing for verified users', async () => {
+    renderRoute(<AccountPage api={fakeDashboardApi()} />, {
+      path: '/account',
+      auth: fakeAuthApi(customerUser),
+    });
+    expect(await screen.findByText('cara@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('Not verified')).not.toBeInTheDocument();
+  });
+});

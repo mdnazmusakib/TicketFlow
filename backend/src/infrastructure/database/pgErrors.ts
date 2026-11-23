@@ -34,9 +34,12 @@ export function mapPgError(error: unknown): AppError | undefined {
       return new ConflictError(`Referenced record constraint ${constraint} failed`, 'CONFLICT', {
         cause: error,
       });
+    // 22007/22008 (invalid_datetime_format / datetime_field_overflow): bad input is a 400, never a 500.
     case '23514':
     case '23502':
     case '22P02':
+    case '22007':
+    case '22008':
       return new ValidationError([{ path: constraint, message: 'Value violates a database rule' }]);
     case '23P01':
       return new ConflictError(`Exclusion constraint ${constraint} failed`, 'CONFLICT', {

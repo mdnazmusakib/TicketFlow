@@ -38,4 +38,6 @@ e2e/                   # Playwright journeys
 - Payment adapters are infrastructure (they call external HTTP APIs); the `PaymentGateway` interface stays in the domain.
 - Notification delivery uses a transactional outbox in the `notifications` table instead of a separate outbox table.
 - Uploads: event banner images through `POST /api/organizer/events/:id/banner` (multer memory storage + magic-byte validation); files behind a `FileStorage` interface with two drivers: local disk (development) and Supabase Storage (ephemeral hosts such as Render free).
-- Rate limiting counters are stored in Redis so limits hold across instances.
+- Rate limiting counters are stored in Redis so limits hold across instances; the client identity comes from an HMAC-signed hand-off by the Vercel middleware or from `req.ip` with an exact `TRUST_PROXY` hop count; sign-in is additionally throttled per account and per IP (`LoginThrottle`).
+- Email OTP verification is configurable (`REQUIRE_EMAIL_VERIFICATION`, currently `false`).
+- Admin accounts are managed by an operator CLI (`npm run admin -w backend`); no admin is seeded.

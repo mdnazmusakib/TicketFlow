@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 import { DEMO, login, logout, unique, waitForMail } from './helpers';
 
 test.describe('Customer journeys', () => {
-  test('registration with email OTP, then sign out and sign back in', async ({ page }) => {
+  test('registration signs in immediately; email OTP verification stays optional', async ({
+    page,
+  }) => {
     const email = `${unique('e2e.customer.')}@example.com`;
     const password = 'Str0ng!Passw0rd';
 
@@ -13,6 +15,13 @@ test.describe('Customer journeys', () => {
     await page.getByLabel('I want to').selectOption('CUSTOMER');
     await page.getByRole('button', { name: 'Create account' }).click();
 
+    // Verification is optional (REQUIRE_EMAIL_VERIFICATION=false): straight to the dashboard.
+    await expect(page).toHaveURL(/\/account$/);
+    await expect(page.getByRole('heading', { name: 'My dashboard' })).toBeVisible();
+    await expect(page.getByText('Not verified')).toBeVisible();
+
+    // The verification email was still sent; the user can verify from the profile.
+    await page.getByRole('link', { name: 'Verify email' }).click();
     await expect(page).toHaveURL(/\/verify-email/);
     const mail = await waitForMail(email, /code|verify/i);
     const otp = /\b(\d{6})\b/.exec(mail.text)?.[1];
@@ -26,7 +35,7 @@ test.describe('Customer journeys', () => {
     await page.getByLabel('Verification code').fill(otp!);
     await page.getByRole('button', { name: 'Verify' }).click();
     await expect(page).toHaveURL(/\/account$/);
-    await expect(page.getByRole('heading', { name: 'My dashboard' })).toBeVisible();
+    await expect(page.getByText('Not verified')).toHaveCount(0);
 
     await logout(page);
     await login(page, { email, password });

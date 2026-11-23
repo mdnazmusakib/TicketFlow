@@ -131,6 +131,25 @@ describe('Notifications: outbox delivery, reminders and in-app inbox', () => {
   });
 
   describe('retries', () => {
+    it('in-app notifications are delivered even when email delivery fails', async () => {
+      const { agent, bookingId } = await confirmedBooking(h);
+      jest.spyOn(h.emails, 'send').mockRejectedValue(new Error('SMTP unavailable'));
+      await drain();
+      const rows = await rowsFor(bookingId, 'BOOKING_CONFIRMED');
+      expect(rows.map((r) => [r.channel, r.delivery_status])).toEqual([
+        ['EMAIL', 'FAILED'],
+        ['IN_APP', 'SENT'],
+      ]);
+      const inbox = await agent.get('/api/notifications').expect(200);
+      expect(inbox.body.data).toEqual([
+        expect.objectContaining({ type: 'BOOKING_CONFIRMED', bookingId, isRead: false }),
+      ]);
+      expect((await agent.get('/api/notifications/unread-count').expect(200)).body.data).toEqual({
+        unreadCount: 1,
+      });
+      jest.restoreAllMocks();
+    });
+
     it('retries a failed email with backoff and then delivers it', async () => {
       const { bookingId, userId } = await confirmedBooking(h);
       const email = await emailOf(userId);

@@ -10,7 +10,7 @@ Verification run for this audit: lint, Prettier, typecheck, build clean; backend
 
 | # | Requirement | Status | Evidence |
 | --- | --- | --- | --- |
-| 1.1 | Registration with email OTP verification | COMPLETE | `OtpService`, `auth.api.test.ts`, Playwright registration journey (real OTP from mailbox) |
+| 1.1 | Registration with email OTP verification | PARTIAL (by decision) | OTP flow complete and tested, but **optional for now** (`REQUIRE_EMAIL_VERIFICATION=false`, owner decision 2026-11-22); setting it to `true` restores mandatory verification (tested in `auth.api.test.ts` / `authOptionalVerification.api.test.ts`) |
 | 1.2 | OTP bypass in tests (`NODE_ENV=test` / `TEST_BYPASS_OTP`) and never in production | COMPLETE | config rules + `health.api.test.ts` (bypass ignored in production) |
 | 1.3 | Login/logout, httpOnly cookie JWT, bcrypt, RBAC | COMPLETE | `AuthService`, `TokenService`, auth tests, Playwright login/logout |
 | 2.1 | Venue, date-time, seat map (rows × seats), categories with prices, pricing strategy per event | COMPLETE | `EventService`, `organizer.api.test.ts`, Playwright organizer journey |
@@ -39,7 +39,7 @@ Verification run for this audit: lint, Prettier, typecheck, build clean; backend
 | Requirement | Status | Evidence |
 | --- | --- | --- |
 | Organizer / Customer / protected admin routes | COMPLETE | `requireRole`, admin router + service checks, RBAC tests, Playwright RBAC |
-| Demo Organizer and Customer credentials in README and login UI | COMPLETE | README "Demo credentials", `DemoCredentials` component, seeded accounts |
+| Demo Organizer and Customer credentials in README and login UI | PARTIAL (by decision) | README only: removed from the web app at the owner's request for security; admin credentials removed everywhere and no admin is seeded |
 | Customer dashboard (profile, bookings, payments, refunds, notifications) | COMPLETE | `dashboard.api.test.ts`, `dashboards.test.tsx` |
 | Organizer dashboard (events, venues/seat maps, pricing, booking overview, statistics) | COMPLETE | dashboard API/frontend tests, Playwright booking overview |
 | Admin capabilities (platform overview, user directory) | COMPLETE | admin API (ADMIN only) and page tests |
@@ -53,7 +53,7 @@ Verification run for this audit: lint, Prettier, typecheck, build clean; backend
 | Zod input validation | COMPLETE | `validate` middleware on all routes; validation tests |
 | File upload validation (JPEG/PNG/WebP, 2 MB, content check, random names, no traversal) | COMPLETE | `uploads.api.test.ts`, `uploads.test.ts`, frontend `uploads.test.tsx` |
 | Webhook signature verification | COMPLETE | HMAC / `verify_sign` tests, sandbox test |
-| Rate limiting | COMPLETE | Redis-backed limiter; middleware + store tests |
+| Rate limiting | COMPLETE (code) / NOT VERIFIED (production) | Redis-backed limiter, trusted client-IP resolution (signed Vercel hand-off, exact `TRUST_PROXY` hops), per-account + per-IP sign-in throttling; `rateLimitSecurity.api.test.ts`, `loginThrottle.test.ts`, `middleware.test.ts`; confirm `TRUST_PROXY=3` on Render with `/api/admin/diagnostics/request` after deploying |
 | Strict CORS | COMPLETE | CORS tests (disallowed origin rejected) |
 | Redacted logger | COMPLETE | logger redaction tests |
 | Production debug disabled, no sensitive info exposed | COMPLETE | config rules (log level, stack traces dev-only); production smoke |

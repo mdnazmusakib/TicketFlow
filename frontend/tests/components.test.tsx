@@ -5,8 +5,6 @@ import { routes } from '../src/app/routes';
 import { ErrorBoundary } from '../src/components/feedback/ErrorBoundary';
 import { AuthProvider } from '../src/features/auth/AuthContext';
 import { anonymousAuthApi } from './testUtils';
-import { DemoCredentials } from '../src/features/auth/DemoCredentials';
-import { DEMO_ACCOUNTS } from '../src/features/auth/demoAccounts';
 import { SystemStatus } from '../src/features/system/SystemStatus';
 import { fetchReadiness, type ReadinessReport } from '../src/features/system/healthApi';
 import { ApiClient, ApiError } from '../src/lib/apiClient';
@@ -71,24 +69,6 @@ describe('SystemStatus', () => {
     const report = await fetchReadiness(undefined, new ApiClient('/api', fetchMock));
     expect(report.status).toBe('unavailable');
     expect(fetchMock.mock.calls[0][0]).toBe('/api/health/ready');
-  });
-});
-
-describe('DemoCredentials', () => {
-  it('lists the demo organizer and customer accounts', () => {
-    render(<DemoCredentials />);
-    for (const account of DEMO_ACCOUNTS) {
-      expect(screen.getByText(account.email)).toBeInTheDocument();
-    }
-    expect(screen.getByText('Organizer')).toBeInTheDocument();
-    expect(screen.getByText('Customer')).toBeInTheDocument();
-  });
-
-  it('lets a form pick an account', async () => {
-    const onSelect = jest.fn();
-    render(<DemoCredentials onSelect={onSelect} />);
-    await userEvent.click(screen.getAllByRole('button', { name: 'Use' })[0]!);
-    expect(onSelect).toHaveBeenCalledWith(DEMO_ACCOUNTS[0]);
   });
 });
 

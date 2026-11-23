@@ -65,6 +65,7 @@ export async function createApiHarness(
   const config = testConfig({
     REDIS_KEY_PREFIX: `h${process.pid}x${redisDb}x${Date.now().toString(36)}:`,
     AUTH_RATE_LIMIT_MAX: '10000',
+    LOGIN_MAX_ATTEMPTS_PER_IP: '1000',
     RATE_LIMIT_MAX: '10000',
     BOOKING_RATE_LIMIT_MAX: '10000',
     ...options.env,

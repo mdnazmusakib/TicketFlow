@@ -11,6 +11,7 @@ import type { Controllers } from './container';
 import { createErrorHandler, notFoundHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimiter';
 import { requestId } from './middlewares/requestId';
+import { createClientIpMiddleware } from './middlewares/clientIp';
 import { createFrontendRouter } from './middlewares/spa';
 import { createRequestLogger } from './middlewares/requestLogger';
 import { createApiRouter } from './routes';
@@ -77,6 +78,14 @@ export function createApp({
     }),
   );
   app.use(cookieParser());
+  // Rate-limit identity: proxy-signed client IP or req.ip (TRUST_PROXY hops only).
+  app.use(
+    createClientIpMiddleware({
+      proxySecret: config.trustedProxy.secret,
+      requireTrustedProxy: config.trustedProxy.required,
+      clientIpHeader: config.trustedProxy.clientIpHeader,
+    }),
+  );
 
   const authLimiter = createRateLimiter({
     ...store('auth'),

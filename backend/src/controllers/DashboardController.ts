@@ -72,6 +72,34 @@ export class DashboardController {
     sendSuccess(res, await this.dashboards.admin(getAuth(req).actor));
   };
 
+  /**
+   * ADMIN-only: how the API sees the caller's own request (client IP resolution and the
+   * forwarding headers that arrived). Used once after deploying to pick TRUST_PROXY /
+   * CLIENT_IP_HEADER. Returns only the requester's own network data.
+   */
+  requestDiagnostics = (req: Request, res: Response) => {
+    const pick = (name: string) => {
+      const value = req.headers[name];
+      return typeof value === 'string' ? value : null;
+    };
+    res.setHeader('Cache-Control', 'no-store');
+    sendSuccess(res, {
+      clientIp: req.clientIp ?? null,
+      viaTrustedProxy: req.viaTrustedProxy === true,
+      expressIp: req.ip ?? null,
+      expressIps: req.ips,
+      socketAddress: req.socket.remoteAddress ?? null,
+      trustProxy: req.app.get('trust proxy fn') ? req.app.get('trust proxy') : null,
+      headers: {
+        'x-forwarded-for': pick('x-forwarded-for'),
+        'cf-connecting-ip': pick('cf-connecting-ip'),
+        'true-client-ip': pick('true-client-ip'),
+        'x-real-ip': pick('x-real-ip'),
+        'x-forwarded-proto': pick('x-forwarded-proto'),
+      },
+    });
+  };
+
   adminUsers = async (req: Request, res: Response) => {
     const { query } = getValidated<{ query: z.output<typeof adminUsersQuerySchema> }>(req);
     const { items, meta } = await this.dashboards.adminUsers(getAuth(req).actor, query);

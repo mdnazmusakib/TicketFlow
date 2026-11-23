@@ -26,7 +26,7 @@ flowchart LR
 | Layer | Responsibility | Examples |
 | --- | --- | --- |
 | `routes/` | URL → handler wiring, guards per route | `booking.routes.ts`, `dashboard.routes.ts` |
-| `middlewares/` | cross-cutting HTTP concerns | `auth` (JWT cookie, `requireRole`), `validate` (Zod), `rateLimiter`, `upload` (multer, memory only), `spa`, `errorHandler` |
+| `middlewares/` | cross-cutting HTTP concerns | `clientIp` (trusted client identity, optional direct-access block), `auth` (JWT cookie, `requireRole`), `validate` (Zod), `rateLimiter`, `upload` (multer, memory only), `spa`, `errorHandler` |
 | `controllers/` | HTTP in/out only; no SQL, no business rules (enforced by ESLint import rules) | `BookingController`, `UploadController` |
 | `services/` | orchestration and transactions | `BookingService`, `PaymentService`, `CancellationService`, `NotificationDispatcher`, `ReminderService`, `DashboardService`, `EventBannerService` |
 | `domain/` | pure rules and interfaces | pricing strategies, booking state machine, `PaymentGateway`, `NotificationChannel`, refund rule, image detection, `FileStorage` |
@@ -69,7 +69,10 @@ Lock booking → verify any open attempt first → decide refund (`> 24 h` befor
 - Lifecycle observer enqueues Email + In-App rows (dedupe key `type:booking:channel`).
 - `IntervalWorker` (every `NOTIFICATION_WORKER_INTERVAL_MS`): `ReminderService.scheduleDue()` claims confirmed bookings starting between 1 hour and `REMINDER_WINDOW_MINUTES` from now (`FOR UPDATE SKIP LOCKED`, sets `reminder_sent_at`) → `NotificationDispatcher.deliverDue()` claims due rows with a lease, delivers through the channel, retries failures with exponential backoff, skips reminders whose event already started.
 
-### 4.5 Banner upload
+### 4.5 Client identity and sign-in throttling
+Vercel middleware (`frontend/middleware.ts`) proxies `/api` and `/uploads` and adds an HMAC-signed client IP → `clientIp` middleware accepts it if valid and fresh, else uses `CLIENT_IP_HEADER` or `req.ip` (exactly `TRUST_PROXY` hops) → all IP limiters key on `req.clientIp` → `AuthService.login` calls `LoginThrottle.attempt(email, ip)` (atomic Redis counters per account and per IP) before checking the password.
+
+### 4.6 Banner upload
 `multer` (memory, 1 file, ≤ 2 MB, MIME allowlist) → `EventBannerService.validate` (magic bytes must match the declared type) → random `<uuid>.<ext>` key → `FileStorage.put` (`LocalFileStorage`: path confined to the upload root; `SupabaseFileStorage`: private bucket; neither overwrites) → event row updated in a transaction (ownership + editable status) → old file removed.
 
 ## 5. Frontend

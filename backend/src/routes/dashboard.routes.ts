@@ -53,5 +53,6 @@ export function createAdminRouter(
   router.use(authenticate, requireRole('ADMIN'));
   router.get('/overview', controller.admin);
   router.get('/users', validate({ query: adminUsersQuerySchema }), controller.adminUsers);
+  router.get('/diagnostics/request', controller.requestDiagnostics);
   return router;
 }

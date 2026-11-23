@@ -19,7 +19,17 @@ function Profile({ user }: { user: User }) {
         <dt>Name</dt>
         <dd>{user.name}</dd>
         <dt>Email</dt>
-        <dd>{user.email}</dd>
+        <dd>
+          {user.email}
+          {!user.emailVerified && (
+            <>
+              {' '}
+              <span className="badge badge--neutral">Not verified</span>{' '}
+              {/* Verification is optional for now; the OTP flow stays available. */}
+              <Link to={`/verify-email?email=${encodeURIComponent(user.email)}`}>Verify email</Link>
+            </>
+          )}
+        </dd>
         <dt>Role</dt>
         <dd>{user.role}</dd>
         <dt>Member since</dt>

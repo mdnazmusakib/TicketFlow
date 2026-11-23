@@ -45,6 +45,7 @@ import { SeatMapRepository } from './repositories/SeatMapRepository';
 import { UserRepository } from './repositories/UserRepository';
 import { VenueRepository } from './repositories/VenueRepository';
 import { AuthService } from './services/auth/AuthService';
+import { LoginThrottle } from './services/auth/LoginThrottle';
 import { OtpService } from './services/auth/OtpService';
 import { TokenService } from './services/auth/TokenService';
 import { BookingExpiryService } from './services/booking/BookingExpiryService';
@@ -136,6 +137,9 @@ function createEmailSender(config: AppConfig): EmailSender {
   if (config.email.transport === 'smtp' && config.email.smtp) {
     return new SmtpEmailSender(config.email.smtp, config.email.from);
   }
+  // Defence in depth (config validation already enforces smtp in production): the console
+  // transport prints full emails, including OTP codes, to stdout.
+  if (config.isProduction) throw new Error('EMAIL_TRANSPORT=console is not allowed in production');
   return new ConsoleEmailSender(config.email.from);
 }
 
@@ -190,6 +194,12 @@ export function buildContainer(
     emailSender,
     {
       otpBypass: config.isProduction ? false : (overrides.otpBypass ?? config.auth.otpBypass),
+      requireEmailVerification: config.auth.requireEmailVerification,
+      loginThrottle: new LoginThrottle(ttlStore, {
+        secret: config.auth.jwtSecret,
+        ...config.auth.loginThrottle,
+        logger,
+      }),
       otpTtlSeconds: config.auth.otpTtlSeconds,
       logger,
     },

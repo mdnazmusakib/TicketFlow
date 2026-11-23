@@ -66,11 +66,11 @@ describe('LoginPage', () => {
     expect(await screen.findByText('Verify page')).toBeInTheDocument();
   });
 
-  it('prefills demo credentials', async () => {
-    renderRoute(<LoginPage />, { path: '/login' });
-    await userEvent.click(screen.getAllByRole('button', { name: 'Use' })[0]!);
-    expect(screen.getByLabelText('Email')).toHaveValue('organizer.demo@example.com');
-    expect(screen.getByLabelText('Password')).toHaveValue('Organizer@123');
+  it('shows no demo accounts or passwords', () => {
+    const { container } = renderRoute(<LoginPage />, { path: '/login' });
+    expect(container.textContent).not.toMatch(/demo@example.com|@123|Demo accounts/i);
+    expect(screen.queryByRole('button', { name: 'Use' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toHaveValue('');
   });
 });
 

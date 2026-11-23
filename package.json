@@ -24,7 +24,8 @@
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
     "e2e": "npm run build -w frontend && playwright test",
-    "e2e:only": "playwright test"
+    "e2e:only": "playwright test",
+    "check:credentials": "node scripts/check-public-credentials.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
