@@ -25,4 +25,8 @@ export const RedisKeys = {
   revokedToken: (jti: string): string => `revoked_jwt:${segment(jti)}`,
   /** OTP verification attempt counter. */
   otpAttempts: (email: string): string => `otp_attempts:${segment(email.toLowerCase())}`,
+  /** Sign-in attempts per account (HMAC of the normalized email, never the raw address). */
+  loginAttemptsEmail: (digest: string): string => `login_attempts:email:${segment(digest)}`,
+  /** Sign-in attempts per trusted client IP (HMAC of the IP). */
+  loginAttemptsIp: (digest: string): string => `login_attempts:ip:${segment(digest)}`,
 } as const;

@@ -86,18 +86,56 @@ export const organizerEventListSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-/** Accepts YYYY-MM-DD (UTC day) or a full ISO timestamp. */
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(\.\d{1,3})?)?(Z|([+-])(\d{2}):(\d{2}))$/;
+const INVALID_DATE_MESSAGE =
+  'Invalid date: use a real calendar date as YYYY-MM-DD or an ISO 8601 date-time with a time zone';
+
+/** True only for dates that exist on the calendar (rejects 2026-13-40, 2026-02-30, ...). */
+function isCalendarDate(year: number, month: number, day: number): boolean {
+  if (year < 1900 || year > 2999 || month < 1 || month > 12 || day < 1) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+/**
+ * Strict parser for search date filters. No permissive Date.parse fallback, which would
+ * accept odd formats or silently roll impossible dates over (Feb 30 becomes Mar 2).
+ * - YYYY-MM-DD: that UTC day (with endOfDay, the instant the next day starts)
+ * - YYYY-MM-DDTHH:mm[:ss[.SSS]](Z|+HH:mm|-HH:mm): that exact instant
+ */
+export function parseDateBoundary(value: string, endOfDay: boolean): Date | null {
+  const day = DATE_ONLY.exec(value);
+  if (day) {
+    const [year, month, date] = [Number(day[1]), Number(day[2]), Number(day[3])];
+    if (!isCalendarDate(year, month, date)) return null;
+    return new Date(Date.UTC(year, month - 1, date + (endOfDay ? 1 : 0)));
+  }
+  const dt = DATE_TIME.exec(value);
+  if (!dt) return null;
+  const [year, month, date, hour, minute] = [1, 2, 3, 4, 5].map((i) => Number(dt[i]));
+  const second = dt[6] ? Number(dt[6]) : 0;
+  if (!isCalendarDate(year!, month!, date!) || hour! > 23 || minute! > 59 || second > 59) {
+    return null;
+  }
+  if (dt[9] && (Number(dt[10]) > 14 || Number(dt[11]) > 59)) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 const dateBoundary = (endOfDay: boolean) =>
   z
     .string()
     .trim()
-    .refine((value) => DATE_ONLY.test(value) || !Number.isNaN(Date.parse(value)), 'Invalid date')
-    .transform((value) => {
-      if (!DATE_ONLY.test(value)) return new Date(value);
-      const date = new Date(`${value}T00:00:00.000Z`);
-      if (endOfDay) date.setUTCDate(date.getUTCDate() + 1);
-      return date;
+    .max(40)
+    .transform((value, ctx) => {
+      const parsed = parseDateBoundary(value, endOfDay);
+      if (!parsed) {
+        ctx.addIssue({ code: 'custom', message: INVALID_DATE_MESSAGE });
+        return z.NEVER;
+      }
+      return parsed;
     });
 
 export const publicEventQuerySchema = z
@@ -121,8 +159,10 @@ export const publicEventQuerySchema = z
     page: z.coerce.number().int().min(1).max(10_000).default(1),
     pageSize: z.coerce.number().int().min(1).max(50).default(12),
   })
+  // 'to' is an exclusive bound (a YYYY-MM-DD 'to' already points at the next midnight, so the
+  // whole day is included): the range must not be empty or reversed.
   .refine((value) => !value.from || !value.to || value.from < value.to, {
-    message: '"from" must be before "to"',
+    message: '"from" must not be after "to"',
     path: ['to'],
   });
 

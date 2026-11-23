@@ -1,4 +1,4 @@
-import rateLimit, { type Options, type Store } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, type Options, type Store } from 'express-rate-limit';
 import type { RequestHandler } from 'express';
 import { RateLimitError } from '../shared/errors/AppError';
 
@@ -21,6 +21,9 @@ export function createRateLimiter(options: RateLimiterOptions): RequestHandler {
     limit: options.max,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
+    // Identity from the clientIp middleware (proxy-signed IP or req.ip within TRUST_PROXY
+    // hops), never a raw client-supplied header. IPv6 clients are grouped by /56 subnet.
+    keyGenerator: (req) => ipKeyGenerator(req.clientIp ?? req.ip ?? 'unknown'),
     ...(options.store ? { store: options.store } : {}),
     ...(options.skip ? { skip: options.skip } : {}),
     handler: (_req, _res, next) => next(new RateLimitError()),

@@ -86,4 +86,26 @@ export class UserRepository {
   async recordLogin(id: string, db: Queryable = this.db): Promise<void> {
     await db.query('UPDATE users SET last_login_at = now() WHERE id = $1', [id]);
   }
+
+  // ---- account administration (operator CLI only; no HTTP route exposes these) ----
+
+  async listByRole(role: Role, db: Queryable = this.db): Promise<UserRecord[]> {
+    const { rows } = await db.query<UserRow>(
+      `SELECT ${COLUMNS} FROM users WHERE role = $1 ORDER BY created_at`,
+      [role],
+    );
+    return rows.map(toRecord);
+  }
+
+  async setRole(id: string, role: Role, db: Queryable = this.db): Promise<void> {
+    await db.query('UPDATE users SET role = $2 WHERE id = $1', [id, role]);
+  }
+
+  async setPasswordHash(id: string, passwordHash: string, db: Queryable = this.db): Promise<void> {
+    await db.query('UPDATE users SET password_hash = $2 WHERE id = $1', [id, passwordHash]);
+  }
+
+  async setActive(id: string, active: boolean, db: Queryable = this.db): Promise<void> {
+    await db.query('UPDATE users SET is_active = $2 WHERE id = $1', [id, active]);
+  }
 }

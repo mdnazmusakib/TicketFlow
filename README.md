@@ -18,16 +18,15 @@ Event ticket booking platform (in the spirit of Ticketmaster / BookMyShow). Orga
 
 ## Demo credentials
 
-Created by `npm run db:seed` (all pre-verified, passwords bcrypt-hashed in the database). Never use them in production.
+Created by `npm run db:seed` for local development and demos (pre-verified, passwords bcrypt-hashed in the database).
 
 | Role | Email | Password |
 | --- | --- | --- |
 | Organizer | `organizer.demo@example.com` | `Organizer@123` |
 | Customer | `customer.demo@example.com` | `Customer@123` |
 | Customer 2 | `customer2.demo@example.com` | `Customer@123` |
-| Admin | `admin.demo@example.com` | `Admin@12345` |
 
-The same accounts are listed in the web app (`frontend/src/features/auth/demoAccounts.ts`).
+Demo credentials are **not** shown anywhere in the web app (CI fails if a credential reaches the frontend source or build: `npm run check:credentials`). **No admin is seeded**: create one with the admin CLI (see "Admin accounts").
 
 Seeded catalogue: 2 venues (Dhaka, Chattogram) and 4 events, 220 seats in total: a BASE-priced concert, an EARLY_BIRD tech summit (20% off), an event starting in about 3 hours (to try reminders and the no-refund window) and a draft event.
 
@@ -98,7 +97,10 @@ Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(4
 | `NODE_ENV` | no (development) | `production` enables every production safety rule below |
 | `PORT` | no (4000) | HTTP port |
 | `LOG_LEVEL` | no (info) | `debug`/`trace` are rejected in production |
-| `TRUST_PROXY` | no (0) | Number of proxy hops (set `1` behind Render/Fly/NGINX so rate limits see the client IP) |
+| `TRUST_PROXY` | no (0) | Number of reverse-proxy hops whose `X-Forwarded-For` entries are trusted. Must equal the real number of proxies: **3 on Render** (see "Client IP and rate limits"); too high lets clients choose their IP, too low makes all users share one counter |
+| `TRUSTED_PROXY_SECRET` | no | ≥ 32 random characters, identical on Render and Vercel; lets the Vercel middleware sign the real client IP |
+| `REQUIRE_TRUSTED_PROXY` | no (false) | `true`: unsigned requests are refused except `/api/health/*`, payment callbacks (`/api/payments/webhooks/*`, `/api/payments/providers/*`) and `/uploads/*` |
+| `CLIENT_IP_HEADER` | no | A header your edge always overwrites (e.g. `cf-connecting-ip`); only set after checking `/api/admin/diagnostics/request` |
 | `DATABASE_URL` | yes | Supabase **session pooler** (port 5432) or direct URI. The transaction pooler (6543) is not supported. |
 | `DATABASE_SSL` | no (true) | Must be true in production |
 | `DATABASE_SSL_CA_PATH` | no | Path to the Supabase root CA to verify the server certificate |
@@ -113,7 +115,8 @@ Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(4
 | `DEFAULT_CURRENCY` | no (BDT) | Currency of new events |
 | `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX` | no (900000, 300) | Global API limit per IP (Redis-backed, shared across instances) |
 | `SEAT_HOLD_TTL_SECONDS` | no (300) | |
-| `TEST_BYPASS_OTP` | no (false) | Rejected in production; OTP is always bypassed when `NODE_ENV=test` |
+| `REQUIRE_EMAIL_VERIFICATION` | no (**false**) | `false` (current, temporary): accounts work right after signup, verification is optional. `true`: users must enter the email OTP before they can sign in |
+| `TEST_BYPASS_OTP` | no (false) | Automated tests only (accounts created verified); rejected in production; always on when `NODE_ENV=test` |
 | `ALLOW_SEED` | no (false) | Needed to seed when `NODE_ENV=production` |
 | `JWT_EXPIRES_IN` | no (1h) | Session lifetime (cookie expires with the token) |
 | `AUTH_COOKIE_NAME` | no (tf_session) | httpOnly session cookie name |
@@ -121,8 +124,11 @@ Generate a JWT secret with `node -e "console.log(require('crypto').randomBytes(4
 | `COOKIE_SAMESITE` | no (lax) | `lax`, `strict`, or `none` (only for a frontend on another site **without** the Vercel proxy; requires `COOKIE_SECURE=true`) |
 | `OTP_MAX_ATTEMPTS` | no (5) | Wrong codes allowed before the code is burned |
 | `OTP_RESEND_COOLDOWN_SECONDS` | no (60) | Minimum gap between OTP emails |
-| `AUTH_RATE_LIMIT_MAX` | no (30) | Requests per window per IP on `/api/auth/*` |
-| `EMAIL_TRANSPORT` | no (console) | `console` prints emails (incl. OTPs) to the backend terminal; `smtp` is required in production |
+| `AUTH_RATE_LIMIT_MAX` | no (30) | Requests per window per client on `/api/auth/*` (register, login, OTP) |
+| `LOGIN_MAX_ATTEMPTS_PER_EMAIL` | no (5) | Sign-in attempts per account (from any IP) per window |
+| `LOGIN_MAX_ATTEMPTS_PER_IP` | no (20) | Sign-in attempts per client IP (any account) per window |
+| `LOGIN_THROTTLE_WINDOW_SECONDS` | no (900) | Window for both sign-in counters |
+| `EMAIL_TRANSPORT` | no (console) | `console`: development mailbox, prints each email as a `[DEV MAIL]` block in the backend terminal (includes OTP codes, so it is refused in production). `smtp`: required in production |
 | `BOOKING_EXPIRY_INTERVAL_MS` | no (15000) | How often expired holds are released |
 | `BOOKING_RATE_LIMIT_MAX` | no (60) | Hold/checkout/cancel requests per window per IP |
 | `FRONTEND_URL` | no (first CORS origin) | Web app URL used for payment return pages |
@@ -155,6 +161,41 @@ The server validates every variable at startup and exits listing invalid names (
 
 The server validates every variable at startup and exits listing invalid variable **names** (never values). In production it also refuses: console email, OTP bypass, non-Secure cookies, non-TLS database, http CORS origins or `PUBLIC_API_URL`, debug/trace logging, placeholder JWT secrets, and mock payments without a webhook secret.
 
+## Security configuration
+
+### Email verification (OTP)
+- **Now**: `REQUIRE_EMAIL_VERIFICATION=false` (default). Registration signs the user in immediately and existing unverified users can sign in; `users.email_verified` still shows the real status. A verification email is still sent (best effort; a mail failure never blocks signup) and the profile page shows **Not verified · Verify email**, which opens `/verify-email`. OTP codes are hashed in Redis, expire after 5 minutes, allow 5 attempts and have a resend cooldown; they never appear in API responses.
+- **Re-enable mandatory verification**: set `REQUIRE_EMAIL_VERIFICATION=true` on the API and redeploy. Registration then returns `verificationRequired: true` without a session, sign-in answers `403 EMAIL_NOT_VERIFIED` until the code is entered, and sessions of unverified users stop working. No code or data changes are needed.
+- Unverified users get no extra privileges: roles are unchanged, `ADMIN` can never be self-registered, disabled accounts are always refused.
+
+### Client IP and rate limits
+- Every IP-based limiter (global, `/api/auth/*`, booking, images) and the sign-in throttle use one identity, `req.clientIp`, resolved in `backend/src/middlewares/clientIp.ts`:
+  1. **Signed client IP from Vercel**: `frontend/middleware.ts` (Vercel Routing Middleware) proxies `/api/*` and `/uploads/*`, reads the client IP that Vercel's edge recorded (`x-real-ip` / `x-forwarded-for` on the Vercel side), and sends it to the API as `x-tf-client-ip` with a timestamp and an HMAC-SHA256 signature made with `TRUSTED_PROXY_SECRET` (never sent to browsers). The API accepts it only if the signature verifies and the timestamp is under 60 s old; client-supplied `x-tf-*` headers are stripped by the middleware and forged ones fail verification.
+  2. `CLIENT_IP_HEADER`, if configured.
+  3. Otherwise `req.ip`: Express reads `X-Forwarded-For` from the right and trusts exactly `TRUST_PROXY` hops; anything a client typed further left is ignored.
+- **Render's proxy layer**: requests pass Cloudflare's edge and Render's load balancers, which each append to `X-Forwarded-For`. A live test with `TRUST_PROXY=2` showed the identity was the **Cloudflare edge address** (counters changed with the Cloudflare location, not with spoofed headers), so all users routed through one location shared a counter. The real client is one hop further: **`TRUST_PROXY=3`**. Verify after deploying: sign in as admin and open `/api/admin/diagnostics/request` directly on Render (`clientIp` must be your public IP), then repeat with a fake header, e.g. `curl -H "X-Forwarded-For: 1.2.3.4" …` with your session cookie; `clientIp` must not change. Lower `TRUST_PROXY` by one if `clientIp` shows an infrastructure address, never raise it beyond that.
+- **Direct access to Render**: anyone can call `https://<service>.onrender.com` and skip Vercel. With `REQUIRE_TRUSTED_PROXY=true` the API refuses unsigned requests except health checks, SSLCommerz/mock payment callbacks and `/uploads/*` (banner URLs point at the API). Enable it only after the Vercel middleware is deployed with the same secret.
+- **Sign-in throttling (per account and per IP)**: `backend/src/services/auth/LoginThrottle.ts` counts every attempt in Redis **before** the password is checked (atomic `INCR` + `EXPIRE` in one Lua script, so concurrent requests cannot race past it): at most `LOGIN_MAX_ATTEMPTS_PER_EMAIL` per normalized email from any IP, and `LOGIN_MAX_ATTEMPTS_PER_IP` per client IP across accounts, per `LOGIN_THROTTLE_WINDOW_SECONDS`. Keys are HMACs of the email/IP (no raw emails in Redis). A successful sign-in clears the account counter; nothing is locked permanently (an attacker can delay a victim by at most one window). Unknown emails behave exactly like real ones (`429 RATE_LIMITED`, same message). **Redis outage**: fail safe — counting continues in a bounded in-memory store on that instance, so sign-in keeps working and stays throttled.
+- Registration, OTP verification and resend share the `/api/auth/*` limiter; resend also has a per-email cooldown (`OTP_RESEND_COOLDOWN_SECONDS`). There is no password-reset feature yet.
+- **Redis**: one database shared by all API instances (`REDIS_URL`, TLS `rediss://` in production) holds rate-limit counters, sign-in counters, OTPs, seat locks and session revocations.
+
+### Admin accounts
+- No admin account is seeded and none is shown in the web app. Manage admins from your machine with the API's database credentials (`backend/.env` pointing at Supabase); passwords are read from the environment and never printed:
+  - `npm run admin -w backend -- list`
+  - `npm run admin -w backend -- promote you@yourdomain.com` (register the account on the site first)
+  - `ADMIN_NEW_PASSWORD='…' npm run admin -w backend -- set-password you@yourdomain.com` (PowerShell: `$env:ADMIN_NEW_PASSWORD='…'` first)
+  - `npm run admin -w backend -- deactivate admin.demo@example.com` (refuses to deactivate the last active admin; takes effect on the next request)
+- Roles can only change through this CLI: there is no HTTP route that sets a role, and registration accepts only `CUSTOMER` or `ORGANIZER`.
+- `GET /api/admin/diagnostics/request` (ADMIN only) shows how the API sees your own request (client IP, forwarding headers) for the `TRUST_PROXY` check above.
+
+### Email transport
+- Development: `EMAIL_TRANSPORT=console` (default) — `ConsoleEmailSender` prints every email (OTP, booking confirmation, cancellation, reminder) as a `[DEV MAIL]` block to the backend terminal. These are intentional previews, separate from the request logs.
+- Production: `EMAIL_TRANSPORT=smtp` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`. The API refuses to start with console email in production (config check plus a second guard in the container), so OTPs can never end up in production logs.
+- In-app notifications do not depend on email: each channel is a separate outbox row, so a failing mail server leaves the in-app notification delivered and the email retried with backoff.
+
+### Event search dates
+`GET /api/events` accepts `from` / `to` as a real calendar date `YYYY-MM-DD` (UTC day; `to` includes that whole day) or an ISO 8601 date-time with a time zone (`2027-01-01T10:00:00+06:00`). Impossible dates (`2026-13-40`, `2026-02-30`, `2027-02-29`), other formats, and `from` after `to` return `400 VALIDATION_ERROR` before any database query; database date errors are also mapped to 400, never 500.
+
 ## Database migrations and seeding
 
 - Migrations live in `backend/db/migrations` (forward-only, numbered). The runner records each file with a SHA-256 checksum in `schema_migrations`, takes an advisory lock (safe with several instances) and refuses edited history.
@@ -176,6 +217,8 @@ The server validates every variable at startup and exits listing invalid variabl
 | `npm run test:sandbox -w backend` | SSLCommerz sandbox checks with the store in `backend/.env` (no tunnel needed) |
 | `npm run e2e` | Builds the web app and runs the Playwright journeys on a self-contained stack |
 | `npm run db:migrate` · `npm run db:seed` · `npm run db:schema-report -w backend` | Database tasks |
+| `npm run admin -w backend -- <command>` | Admin accounts: list, promote, set-password, deactivate, activate |
+| `npm run check:credentials` | Fails if demo credentials or password literals reach the web app source or build |
 
 ## API
 
@@ -247,7 +290,7 @@ The E2E stack (`npm run e2e:server -w backend`) starts an embedded PostgreSQL wi
 2. Book and pay as `customer.demo@example.com`: within a second the confirmation email appears in the terminal and the 🔔 **Notifications** badge in the header shows 1. Open it to read, mark one or all as read.
 3. Cancel the booking: a cancellation email + in-app notification states the refund outcome.
 4. **Reminder**: book an event that starts in 1–2 hours (create one as the organizer with a start time ~90 minutes ahead). Within `NOTIFICATION_WORKER_INTERVAL_MS` the reminder email and in-app notification arrive, once only. Events less than 1 hour away are not reminded.
-5. **Dashboards**: customers see `/account` (stats, upcoming bookings, notifications); organizers see sales and booking statistics on `/organizer` and per-event bookings via **Bookings**; `admin.demo@example.com` gets `/admin` with platform totals and the user directory.
+5. **Dashboards**: customers see `/account` (stats, upcoming bookings, notifications); organizers see sales and booking statistics on `/organizer` and per-event bookings via **Bookings**; an admin (promote your account with `npm run admin -w backend -- promote <email>`) gets `/admin` with platform totals and the user directory.
 
 ### Seat booking
 
@@ -260,8 +303,8 @@ The E2E stack (`npm run e2e:server -w backend`) starts an embedded PostgreSQL wi
 ### Authentication and authorization
 
 1. Start both apps in two terminals: `npm run dev:backend` and `npm run dev:frontend`, then open http://localhost:5173.
-2. **Sign in** with a demo account from the table above (the login page has "Use" buttons). Organizers land on `/organizer`, customers on `/account`.
-3. **Register + OTP**: create a new account at `/register`. With `EMAIL_TRANSPORT=console` (default) the email, including the 6-digit code, is printed in the **backend terminal** under `[DEV MAIL]`. Enter it at `/verify-email`. Try a wrong code 5 times (locked), wait 5 minutes (expired) or reuse a code (rejected).
+2. **Sign in** with a demo account from the table above. Organizers land on `/organizer`, customers on `/account`.
+3. **Register (+ optional OTP)**: create a new account at `/register`; you are signed in immediately. The verification email, including the 6-digit code, is printed in the **backend terminal** under `[DEV MAIL]`; click **Verify email** on your profile to enter it. Try a wrong code 5 times (locked), wait 5 minutes (expired) or reuse a code (rejected). With `REQUIRE_EMAIL_VERIFICATION=true` the code is required before signing in.
 4. **Role checks**: signed in as the customer, open http://localhost:5173/organizer → "Access denied" (the API also returns 403).
 5. **Ownership / IDOR**: register a second organizer, create a venue and event, copy the event id from the URL (`/organizer/events/<id>/edit`), sign in as the demo organizer and open that URL → the API answers 404, so the page shows an error.
 6. **Logout revocation**: sign out; the old cookie is denylisted in Redis until it would have expired.
@@ -308,7 +351,10 @@ Environment variables (keys only; enter values in the dashboard):
 | `NODE_VERSION` | `24` |
 | `NODE_ENV` | `production` |
 | `LOG_LEVEL` | `info` |
-| `TRUST_PROXY` | `2` (Vercel proxy + Render proxy, so rate limits see the real client IP) |
+| `TRUST_PROXY` | `3` (Cloudflare edge + Render load balancers; confirm with `/api/admin/diagnostics/request`) |
+| `TRUSTED_PROXY_SECRET` | ≥ 32 random characters, same value as on Vercel |
+| `REQUIRE_TRUSTED_PROXY` | `false` first; `true` once the Vercel middleware is live |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` (current product decision) |
 | `DATABASE_URL`, `DATABASE_SSL` | Supabase session pooler URL, `true` |
 | `REDIS_URL` | Upstash `rediss://` URL |
 | `JWT_SECRET` | generated (≥ 32 random characters) |
@@ -323,12 +369,12 @@ Environment variables (keys only; enter values in the dashboard):
 Migrations run at the end of each build (forward-only, checksummed, advisory-locked), so a failed migration fails the deploy and the old version keeps serving. The demo data is already in your Supabase; to re-seed from your machine run `npm run db:seed` (with `ALLOW_SEED=true` if `NODE_ENV=production`).
 
 ### Step 4: Frontend on Vercel
-1. In `frontend/vercel.json`, make sure both rewrite destinations use your Render URL (default: `https://ticketflow-api.onrender.com`; change it if Render gave the service another name).
+1. In `frontend/vercel.json`, make sure both rewrite destinations use your Render URL (currently `https://ticketflow-dev.onrender.com`). They are the fallback when the middleware is not configured.
 2. *Add New → Project* → import the repository → **Root Directory: `frontend`**. Framework, install, build and output settings come from `vercel.json`:
    - Install: `cd .. && npm ci --include=dev --workspace frontend` (installs from the root lockfile)
    - Build: `npm run build` · Output: `dist`
    - Production branch: `main` (Vercel deploys every push; PRs get preview URLs)
-3. No environment variables are needed (`VITE_API_BASE_URL` defaults to `/api`, served through the rewrite).
+3. Environment variables (Vercel → Settings → Environment Variables, Production; server-side only, never `VITE_*`): `API_ORIGIN=https://<your-api>.onrender.com` and `TRUSTED_PROXY_SECRET=<same value as on Render>`. They activate `frontend/middleware.ts`, which proxies `/api` and `/uploads` and signs the client IP. `VITE_API_BASE_URL` stays unset (`/api`).
 4. Put the final Vercel URL into Render's `CORS_ORIGINS` and `FRONTEND_URL` and redeploy the API.
 
 ### Step 5: SSLCommerz URLs after deployment

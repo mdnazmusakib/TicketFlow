@@ -4,7 +4,6 @@ import { Button } from '../../components/ui/Button';
 import { FormAlert, TextField } from '../../components/ui/Form';
 import { ApiError, toErrorMessage } from '../../lib/apiClient';
 import { useAuth } from './AuthContext';
-import { DemoCredentials } from './DemoCredentials';
 import { safeNextPath } from './ProtectedRoute';
 
 export function LoginPage() {
@@ -65,12 +64,6 @@ export function LoginPage() {
           New here? <Link to="/register">Create an account</Link>
         </p>
       </section>
-      <DemoCredentials
-        onSelect={(account) => {
-          setEmail(account.email);
-          setPassword(account.password);
-        }}
-      />
     </div>
   );
 }

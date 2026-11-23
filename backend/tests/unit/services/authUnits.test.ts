@@ -210,3 +210,20 @@ describe('roles and email helpers', () => {
     expect(lines.join('')).toMatch(/\[DEV MAIL\][\s\S]*to: a@b\.co[\s\S]*123456/);
   });
 });
+
+describe('ConsoleEmailSender (development mailbox)', () => {
+  it('keeps the [DEV MAIL] preview format with sender, recipient, subject and body', async () => {
+    const lines: string[] = [];
+    await new ConsoleEmailSender('TicketFlow <no-reply@x.test>', (t) => lines.push(t)).send({
+      to: 'customer@example.com',
+      subject: 'Your TicketFlow tickets: Rock Night',
+      text: 'Booking ID: b-1\nSeats: Row A seat 1',
+    });
+    const output = lines.join('');
+    expect(output).toContain('[DEV MAIL] from: TicketFlow <no-reply@x.test>');
+    expect(output).toContain('to: customer@example.com');
+    expect(output).toContain('subject: Your TicketFlow tickets: Rock Night');
+    expect(output).toContain('Seats: Row A seat 1');
+    expect(output.match(/-{60}/g)).toHaveLength(2);
+  });
+});

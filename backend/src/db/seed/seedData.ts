@@ -68,13 +68,8 @@ export const DEMO_USERS: readonly SeedUser[] = [
     password: 'Customer@123',
     role: 'CUSTOMER',
   },
-  {
-    key: 'admin',
-    name: 'Demo Admin',
-    email: 'admin.demo@example.com',
-    password: 'Admin@12345',
-    role: 'ADMIN',
-  },
+  // No admin is seeded: a password committed to the repository would be public. Create the
+  // administrator with `npm run admin -w backend -- promote <email>` (see README "Admin accounts").
 ];
 
 export const DEMO_VENUES: readonly SeedVenue[] = [

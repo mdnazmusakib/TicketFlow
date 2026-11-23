@@ -15,11 +15,11 @@ function sessionCookie(response: request.Response): string {
   return cookie;
 }
 
-describe('Auth API (OTP enabled)', () => {
+describe('Auth API (mandatory email verification: REQUIRE_EMAIL_VERIFICATION=true)', () => {
   let h: ApiHarness;
 
   beforeAll(async () => {
-    h = await createApiHarness();
+    h = await createApiHarness({ env: { REQUIRE_EMAIL_VERIFICATION: 'true' } });
   });
 
   afterAll(async () => {

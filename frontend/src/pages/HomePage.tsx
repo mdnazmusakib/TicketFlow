@@ -1,6 +1,5 @@
 import { Link } from 'react-router';
 import { useAuth } from '../features/auth/AuthContext';
-import { DemoCredentials } from '../features/auth/DemoCredentials';
 import { SystemStatus } from '../features/system/SystemStatus';
 
 export function HomePage() {
@@ -23,7 +22,6 @@ export function HomePage() {
       </section>
       <div className="grid">
         <SystemStatus />
-        {!user && <DemoCredentials />}
       </div>
     </>
   );

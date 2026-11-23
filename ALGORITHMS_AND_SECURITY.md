@@ -5,7 +5,8 @@ This document describes what is **implemented** (file references point to `backe
 ## 1. Key algorithms and flows
 
 ### 1.1 Signup + email OTP (with test bypass)
-- **Normal mode** (`services/auth/AuthService.ts`, `OtpService`):
+- **Mandatory vs optional** (`REQUIRE_EMAIL_VERIFICATION`, default `false` as a temporary product decision): when `false`, registration signs the user in right away (account stays `email_verified = false`, a verification email is still sent best-effort, and the user can verify later from the profile); sign-in and sessions do not require verification. When `true`, the steps below are enforced: no session until the OTP is verified, `403 EMAIL_NOT_VERIFIED` on sign-in, and sessions of unverified users are rejected.
+- **OTP flow** (`services/auth/AuthService.ts`, `OtpService`):
   1. Register → user stored with `email_verified = false`, bcrypt hash (12 rounds by default).
   2. Generate a 6-digit OTP with a CSPRNG, store only its **hash** in Redis with a 5-minute TTL; email it (console transport in development prints `[DEV MAIL]`, SMTP in production).
   3. `verify-otp` compares in constant time, burns the code after `OTP_MAX_ATTEMPTS` (5) wrong tries, deletes it on success (no replay), sets `email_verified = true` and starts the session.
@@ -51,27 +52,33 @@ Multer keeps the file in memory (1 file, no other fields, ≤ 2 MB) and rejects 
 | --- | --- |
 | Passwords | bcrypt (`BCRYPT_SALT_ROUNDS` 10–15, default 12); password strength rules; generic "invalid email or password" |
 | Sessions | HS256 JWT (algorithm pinned on verify) in an `httpOnly`, `SameSite=Lax` cookie, `Secure` in production (enforced), host-only (no `Domain`); `jti` denylisted in Redis on logout. With the Vercel → Render proxy the cookie is first-party; `COOKIE_SAMESITE=none` exists only for a cross-site frontend without a proxy and is refused unless `Secure` |
-| OTP | CSPRNG, hashed at rest, 5-minute TTL, attempt limit, single use, resend cooldown, bypass impossible in production |
+| OTP | CSPRNG, hashed at rest, 5-minute TTL, attempt limit, single use, resend cooldown, never returned by the API, bypass impossible in production; mandatory only with `REQUIRE_EMAIL_VERIFICATION=true` |
 | Authorization | `requireRole` per route (`CUSTOMER`, `ORGANIZER`, `ADMIN`); ownership checks in services; foreign bookings/events/venues/notifications answer **404** (no IDOR oracle); admin APIs check the role in the router and the service |
 | Input | Zod schemas for body, query and params on every route; JSON body limit 100 kB; urlencoded bodies accepted only on provider callback routes |
 | SQL injection | parameterized queries only; the only interpolations are constant SQL fragments; `LIKE` search escapes `%`, `_`, `\` |
 | XSS | React escaping, no `dangerouslySetInnerHTML`; strict CSP for the web app (`script-src 'self'`, no inline script, `frame-ancestors 'none'`); API responses `default-src 'none'`; uploads sandboxed and content-checked (SVG not allowed) |
 | CSRF | `SameSite=Lax` cookie, JSON-only state-changing endpoints, and the CORS middleware rejects any request whose `Origin` is not allowlisted (including simple multipart POSTs) |
 | CORS | explicit allowlist from `CORS_ORIGINS` (https only in production), credentials allowed, provider callback paths exempt (they carry no session and are signature-verified) |
-| Rate limiting | global API limit, stricter limits on `/api/auth/*` and booking/payment endpoints, image route limit; counters in Redis (shared by all instances) |
+| Rate limiting | global API limit, stricter limits on `/api/auth/*` and booking/payment endpoints, image route limit; counters in Redis (shared by all instances); identity = proxy-signed client IP (Vercel middleware, HMAC + 60 s freshness) or `req.ip` with exactly `TRUST_PROXY` trusted hops, never a raw client header |
+| Brute force | `LoginThrottle`: per-account (HMAC of normalized email, any IP) and per-IP sign-in caps counted atomically before the password check; success resets the account counter; no permanent lockout; same answer for unknown emails; in-memory fallback if Redis fails |
+| Direct API access | optional `REQUIRE_TRUSTED_PROXY`: only signed requests, except health, payment callbacks and `/uploads` |
 | Headers | Helmet: HSTS in production, `nosniff`, frame denial, referrer policy, `X-Powered-By` removed |
 | Payments | signature verification (HMAC / SSLCommerz `verify_sign`, constant-time compare), server-side validation API, amount/currency match, idempotency keys, webhook dedupe, one success/open attempt per booking |
 | Logging | Pino with redaction of passwords, hashes, tokens, cookies, authorization headers, OTPs, secrets, card fields, store passwords, `verify_sign`, payment tokens, connection strings; request ids on every response |
 | Errors | central handler; generic message for 5xx; stack traces only when `NODE_ENV=development` |
-| Configuration | all settings validated at startup; production refuses console email, OTP bypass, insecure cookies, non-TLS DB, http origins/API URL, debug logging, placeholder JWT secrets |
+| Configuration | all settings validated at startup; production refuses console email (also blocked again when the mailer is built), OTP bypass, insecure cookies, non-TLS DB, http origins/API URL, debug logging, placeholder JWT secrets |
+| Admin accounts | no admin seeded or shown in the UI; roles change only through the operator CLI (`npm run admin -w backend`), which never prints passwords and refuses to deactivate the last admin |
 | Secrets | only in `backend/.env` (git-ignored) or the Render/Vercel dashboards / GitHub secrets; CI fails if a `.env` file is committed; Supabase Data API locked (RLS on every table, `anon`/`authenticated` privileges revoked) |
 
-## 3. Phase 6 security audit summary
+## 3. Security audit summary (Phase 6 and post-deployment)
 
 | Area | Finding | Action / status |
 | --- | --- | --- |
 | File uploads | No upload endpoint existed although the PRD requires upload validation | **Fixed**: banner upload with MIME allowlist, 2 MB limit, magic-byte validation, random names, traversal-safe storage, safe serving; 16 tests |
 | Rate limiting | Memory store: limits multiplied by the number of instances | **Fixed**: Redis-backed store (`RedisRateLimitStore`), tested with two app instances sharing one budget |
+| Rate-limit identity (post-deployment audit) | With `TRUST_PROXY=2` on Render the identity was the Cloudflare edge address (live evidence: counters followed the Cloudflare location, not the client, and not spoofed headers), so users behind one location shared limits and one client could exhaust the auth limit for them; sign-in had no per-account cap | **Fixed in code**: `TRUST_PROXY=3` recommendation + admin diagnostics endpoint to confirm, Vercel middleware with HMAC-signed client IP, `CLIENT_IP_HEADER` option, per-account and per-IP sign-in throttling, optional direct-access block; 15 integration + 9 unit tests. Production confirmation pending deployment |
+| Public demo credentials | Demo accounts incl. an **admin** password were shown on the public homepage and login page; the admin was seeded with a repository-known password | **Fixed in code**: credentials removed from the web app (CI scan of source + build), admin removed from the seed, admin CLI. **Production**: the only admin is still the demo admin — deactivate it after promoting your own account (README "Admin accounts") |
+| Event search dates | Impossible dates (e.g. `2026-13-40`) caused HTTP 500 | **Fixed**: strict calendar validation (400), DB date errors mapped to 400 |
 | Production debug | `LOG_LEVEL=debug` was allowed in production | **Fixed**: rejected at startup |
 | Public URL | Production could start with an http/localhost `PUBLIC_API_URL` (broken IPN, mixed-content banner URLs) | **Fixed**: https required in production |
 | Log redaction | `verify_sign`, payment tokens and webhook secrets were not on the redaction list | **Fixed** |

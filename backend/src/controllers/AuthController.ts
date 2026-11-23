@@ -47,7 +47,7 @@ export class AuthController {
 
   login = async (req: Request, res: Response): Promise<void> => {
     const { email, password } = req.body as z.output<typeof loginSchema>;
-    const { user, session } = await this.auth.login(email, password);
+    const { user, session } = await this.auth.login(email, password, req.clientIp ?? req.ip);
     this.setSessionCookie(res, session);
     sendSuccess(res, { user });
   };

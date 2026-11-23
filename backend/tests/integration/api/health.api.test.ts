@@ -133,7 +133,10 @@ describe('Rate limiting and production hardening', () => {
   });
 
   it('enables HSTS and Secure cookies in production', async () => {
-    const h = await createApiHarness({ env: PRODUCTION_ENV, otpBypass: true });
+    const h = await createApiHarness({
+      env: { ...PRODUCTION_ENV, REQUIRE_EMAIL_VERIFICATION: 'true' },
+      otpBypass: true,
+    });
     try {
       const response = await request(h.app).get('/api/health/live');
       expect(response.headers['strict-transport-security']).toContain('max-age=31536000');
