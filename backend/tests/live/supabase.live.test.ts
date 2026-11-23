@@ -72,8 +72,9 @@ describe('Supabase PostgreSQL (live)', () => {
       const { event_id: eventId, seat_id: seatId, customer_id: customerId } = rows[0]!;
       const hold = async () => {
         const booking = await tx.query<{ id: string }>(
-          `INSERT INTO bookings (event_id, customer_id, hold_expires_at, pricing_strategy, total_amount_minor, currency)
-           VALUES ($1, $2, now() + interval '5 minutes', 'BASE', 1000, 'BDT') RETURNING id`,
+          `INSERT INTO bookings (event_id, customer_id, hold_expires_at, pricing_strategy, total_amount_minor,
+             ticket_subtotal_minor, currency)
+           VALUES ($1, $2, now() + interval '5 minutes', 'BASE', 1000, 1000, 'BDT') RETURNING id`,
           [eventId, customerId],
         );
         await tx.query(

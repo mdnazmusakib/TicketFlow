@@ -125,6 +125,14 @@ export function PaymentPanel({
       <h2 id="payment-title">Payment</h2>
       <p>
         Amount due: <strong>{formatMoney(booking.totalAmountMinor, booking.currency)}</strong>
+        {(booking.charges.platformFeeMinor > 0 || booking.charges.vatMinor > 0) && (
+          <span className="muted">
+            {' '}
+            (tickets {formatMoney(booking.charges.ticketSubtotalMinor, booking.currency)} + platform
+            charge {formatMoney(booking.charges.platformFeeMinor, booking.currency)} + VAT{' '}
+            {formatMoney(booking.charges.vatMinor, booking.currency)})
+          </span>
+        )}
       </p>
       <FormAlert message={message?.text} tone={message?.tone} />
 

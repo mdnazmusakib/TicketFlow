@@ -65,11 +65,16 @@ export function OrganizerOverview({ api = defaultApi }: { api?: DashboardApi }) 
         stats={[
           { label: 'Events', value: totals.events },
           { label: 'Seats sold', value: totals.soldSeats, hint: `${totals.heldSeats} on hold` },
-          { label: 'Gross revenue', value: formatMoney(totals.grossRevenueMinor, currency) },
+          { label: 'Ticket sales', value: formatMoney(totals.grossRevenueMinor, currency) },
           {
-            label: 'Net revenue',
+            label: 'Net ticket sales',
             value: formatMoney(totals.netRevenueMinor, currency),
             hint: `${formatMoney(totals.refundedMinor, currency)} refunded`,
+          },
+          {
+            label: 'Not your earnings',
+            value: formatMoney(totals.platformFeesMinor + totals.vatMinor, currency),
+            hint: `Platform charges ${formatMoney(totals.platformFeesMinor, currency)} + VAT ${formatMoney(totals.vatMinor, currency)} paid by customers on top of tickets`,
           },
         ]}
       />

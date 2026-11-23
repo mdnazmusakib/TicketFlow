@@ -1,4 +1,5 @@
 import type { PaymentProviderName } from '../domain/payments/PaymentGateway';
+import type { RefundComponents } from '../domain/pricing/charges';
 import type { PaymentStatus, RefundStatus } from '../domain/payments/paymentRules';
 import type { Queryable } from '../infrastructure/database/types';
 
@@ -23,7 +24,11 @@ export interface RefundRecord {
   id: string;
   bookingId: string;
   paymentId: string;
+  /** Total returned = ticketMinor + platformFeeMinor + vatMinor (migration 0009). */
   amountMinor: number;
+  ticketMinor: number;
+  platformFeeMinor: number;
+  vatMinor: number;
   currency: string;
   status: RefundStatus;
   attempt: number;
@@ -58,6 +63,9 @@ interface RefundRow {
   booking_id: string;
   payment_id: string;
   amount_minor: string;
+  ticket_minor: string;
+  platform_fee_minor: string;
+  vat_minor: string;
   currency: string;
   status: RefundStatus;
   attempt: number;
@@ -92,6 +100,9 @@ const toRefund = (row: RefundRow): RefundRecord => ({
   bookingId: row.booking_id,
   paymentId: row.payment_id,
   amountMinor: Number(row.amount_minor),
+  ticketMinor: Number(row.ticket_minor),
+  platformFeeMinor: Number(row.platform_fee_minor),
+  vatMinor: Number(row.vat_minor),
   currency: row.currency,
   status: row.status,
   attempt: row.attempt,
@@ -245,7 +256,7 @@ export class PaymentRepository {
     refund: {
       bookingId: string;
       paymentId: string;
-      amountMinor: number;
+      components: RefundComponents;
       currency: string;
       attempt: number;
       idempotencyKey: string;
@@ -253,12 +264,16 @@ export class PaymentRepository {
     },
   ): Promise<RefundRecord> {
     const { rows } = await tx.query<RefundRow>(
-      `INSERT INTO refunds (booking_id, payment_id, amount_minor, currency, attempt, idempotency_key, reason)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      `INSERT INTO refunds (booking_id, payment_id, amount_minor, ticket_minor, platform_fee_minor,
+         vat_minor, currency, attempt, idempotency_key, reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
       [
         refund.bookingId,
         refund.paymentId,
-        refund.amountMinor,
+        refund.components.totalMinor,
+        refund.components.ticketMinor,
+        refund.components.platformFeeMinor,
+        refund.components.vatMinor,
         refund.currency,
         refund.attempt,
         refund.idempotencyKey,

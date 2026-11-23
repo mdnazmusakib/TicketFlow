@@ -28,6 +28,16 @@ const baseBooking: Booking = {
   totalAmountMinor: 200000,
   refundAmountMinor: 0,
   currency: 'BDT',
+  // Legacy booking (made before fees existed): ticket subtotal = total.
+  charges: {
+    seatCount: 1,
+    ticketSubtotalMinor: 200000,
+    platformFeePerSeatMinor: 0,
+    platformFeeMinor: 0,
+    vatRateBps: 0,
+    vatMinor: 0,
+    grandTotalMinor: 200000,
+  },
   seats: [
     { seatId: 's1', row: 'A', number: 1, category: 'General', priceMinor: 200000, state: 'HELD' },
   ],
@@ -229,9 +239,16 @@ describe('Cancellation and refund display', () => {
         refundAmountMinor: 200000,
         hoursUntilEvent: 200,
         bookingStatus: 'CONFIRMED',
-        paidAmountMinor: 200000,
+        paidAmountMinor: 205000,
         currency: 'BDT',
         cancellable: true,
+        refundComponents: {
+          ticketMinor: 200000,
+          platformFeeMinor: 0,
+          vatMinor: 0,
+          totalMinor: 200000,
+        },
+        nonRefundable: { platformFeeMinor: 1000, vatMinor: 4000 },
       }),
       cancel: jest.fn().mockResolvedValue({
         ...confirmed,
@@ -243,6 +260,9 @@ describe('Cancellation and refund display', () => {
             id: 'r1',
             status: 'SUCCEEDED',
             amountMinor: 200000,
+            ticketMinor: 200000,
+            platformFeeMinor: 0,
+            vatMinor: 0,
             currency: 'BDT',
             attempt: 1,
             reason: 'x',
@@ -257,11 +277,16 @@ describe('Cancellation and refund display', () => {
     renderRoute(<BookingDetailPage api={api} />, detailRoute);
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel booking' }));
     expect(await screen.findByRole('dialog', { name: 'Confirm cancellation' })).toHaveTextContent(
-      /full refund of BDT\s?2,000\.00/,
+      /full refund of the ticket price: BDT\s?2,000\.00/,
+    );
+    expect(screen.getByRole('dialog', { name: 'Confirm cancellation' })).toHaveTextContent(
+      /platform charge \(BDT\s?10\.00\) and VAT \(BDT\s?40\.00\) are not refundable/,
     );
     await userEvent.click(screen.getByRole('button', { name: 'Confirm cancellation' }));
     expect(
-      await screen.findByText(/A full refund of BDT\s?2,000\.00 has been requested/),
+      await screen.findByText(
+        /A refund of BDT\s?2,000\.00 \(full ticket price\) has been requested/,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText('Refunded')).toBeInTheDocument();
   });
@@ -291,6 +316,9 @@ describe('Cancellation and refund display', () => {
       id: 'r1',
       status: 'FAILED' as const,
       amountMinor: 200000,
+      ticketMinor: 200000,
+      platformFeeMinor: 0,
+      vatMinor: 0,
       currency: 'BDT',
       attempt: 1,
       reason: 'x',

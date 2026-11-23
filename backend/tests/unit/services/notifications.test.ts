@@ -56,7 +56,7 @@ describe('notification templates', () => {
         refundable: true,
         refundAmountMinor: 250000,
       }).message,
-    ).toContain('A full refund of BDT 2,500.00');
+    ).toContain('A refund of BDT 2,500.00 (full ticket price)');
     expect(
       renderNotification('BOOKING_CANCELLED', 'IN_APP', {
         ...facts,
@@ -218,7 +218,9 @@ describe('NotificationDispatcher', () => {
         details: { refundable: true, refundAmountMinor: 250000 },
       },
     });
-    expect(repo.enqueue.mock.calls[0]![1].message).toContain('A full refund of BDT 2,500.00');
+    expect(repo.enqueue.mock.calls[0]![1].message).toContain(
+      'A refund of BDT 2,500.00 (full ticket price)',
+    );
     repo.enqueue.mockClear();
     await dispatcher.onBookingTransition(tx, { ...base, from: 'HELD', to: 'PENDING_PAYMENT' });
     await dispatcher.onBookingTransition(tx, { ...base, from: 'HELD', to: 'EXPIRED' });

@@ -5,6 +5,7 @@ import { getValidated } from '../middlewares/validate';
 import type {
   adminUsersQuerySchema,
   eventBookingsQuerySchema,
+  financeQuerySchema,
   notificationListSchema,
 } from '../schemas/dashboard.schemas';
 import type { idParamsSchema } from '../schemas/event.schemas';
@@ -98,6 +99,12 @@ export class DashboardController {
         'x-forwarded-proto': pick('x-forwarded-proto'),
       },
     });
+  };
+
+  adminFinance = async (req: Request, res: Response) => {
+    const { query } = getValidated<{ query: z.output<typeof financeQuerySchema> }>(req);
+    res.setHeader('Cache-Control', 'no-store');
+    sendSuccess(res, await this.dashboards.adminFinance(getAuth(req).actor, query));
   };
 
   adminUsers = async (req: Request, res: Response) => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { FinanceReport } from './FinanceReport';
 import { Link } from 'react-router';
 import { EmptyState, ErrorMessage, Pagination } from '../../components/ui/Feedback';
 import { SelectField, TextField } from '../../components/ui/Form';
@@ -167,6 +168,7 @@ export function AdminPage({ api = defaultApi }: { api?: DashboardApi }) {
         <h1>Admin console</h1>
       </div>
       <PlatformOverview api={api} />
+      <FinanceReport api={api} />
       <UserDirectory api={api} />
     </div>
   );

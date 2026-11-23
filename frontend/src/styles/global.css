@@ -950,3 +950,50 @@ fieldset {
   opacity: 0.6;
   pointer-events: none;
 }
+
+/* Price breakdown */
+.price-breakdown {
+  margin: 1rem 0;
+}
+
+.price-breakdown__title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.price-breakdown__table th {
+  font-weight: 400;
+}
+
+.price-breakdown__table td {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.price-breakdown__total th,
+.price-breakdown__total td {
+  font-weight: 700;
+  border-top: 2px solid var(--color-border);
+}
+
+/* Printable receipt: only the booking content */
+@media print {
+  .header,
+  .footer,
+  .no-print,
+  .btn,
+  .payment-panel,
+  .cancel-booking {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  .card {
+    box-shadow: none;
+    border-color: #999;
+  }
+}

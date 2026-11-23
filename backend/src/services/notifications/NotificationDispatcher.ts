@@ -51,7 +51,12 @@ export class NotificationDispatcher {
     tx: Queryable,
     type: NotificationType,
     bookingId: string,
-    extra: { refundAmountMinor?: number; refundable?: boolean } = {},
+    extra: {
+      refundAmountMinor?: number;
+      refundable?: boolean;
+      refundPlatformFeeMinor?: number;
+      refundVatMinor?: number;
+    } = {},
   ): Promise<string[]> {
     const facts = await this.repository.bookingFacts(tx, bookingId);
     if (!facts) return [];
@@ -89,6 +94,12 @@ export class NotificationDispatcher {
               refundable: details.refundable === true,
               refundAmountMinor:
                 typeof details.refundAmountMinor === 'number' ? details.refundAmountMinor : 0,
+              refundPlatformFeeMinor:
+                typeof details.refundPlatformFeeMinor === 'number'
+                  ? details.refundPlatformFeeMinor
+                  : 0,
+              refundVatMinor:
+                typeof details.refundVatMinor === 'number' ? details.refundVatMinor : 0,
             }
           : {}),
       });

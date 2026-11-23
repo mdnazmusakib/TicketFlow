@@ -45,6 +45,7 @@ Build **TicketFlow**, an event ticket booking platform (similar to Ticketmaster 
 - **CI/CD**: On push/PR: lint + build + unit/integration tests + coverage + `anthropics/claude-code-security-review`; on merge to `main`: automatic deployment of frontend and backend.
 - **Hosting & Docs**: Live frontend, backend, and database; complete `README.md`, `ARCHITECTURE.md`, `AI_USAGE.md`, `PRD.md`, `TRD.md`, `DATABASE_DESIGN.md`, and `ALGORITHMS_AND_SECURITY.md`.
 ## 5. Implementation Notes (Phase 6)
+- **Platform fee & VAT**: every booked seat carries a BDT 10 platform charge (TicketFlow revenue) and 2% VAT on the ticket price (tax liability), both configurable; the customer pays tickets + platform charge + VAT, shown as a breakdown before payment and on the receipt. Eligible cancellations refund the ticket price; platform charge and VAT are refundable only when configured. Financial reports keep ticket sales, platform revenue and VAT separate.
 - **Admin**: an `ADMIN` role (seeded demo admin, never self-registered) has read-only platform oversight (`/admin`: totals, failed refunds, open payments, notification delivery, user directory) and can manage any organizer's events and venues.
 - **Dashboards**: customers get a dashboard (bookings, payments, refunds, notifications); organizers get sales, occupancy and per-event booking overviews (customer emails masked).
 - **File uploads**: implemented for event banner images (JPEG/PNG/WebP, ≤ 2 MB, content-verified, random file names).

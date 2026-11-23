@@ -9,8 +9,9 @@ import {
   type VerifyPaymentResult,
 } from '../../domain/payments/PaymentGateway';
 import { canTransitionPayment, isOpenPayment } from '../../domain/payments/paymentRules';
+import { fullRefund, type RefundComponents } from '../../domain/pricing/charges';
 import type { Queryable, TransactionRunner } from '../../infrastructure/database/types';
-import type { BookingRepository } from '../../repositories/BookingRepository';
+import type { BookingCore, BookingRepository } from '../../repositories/BookingRepository';
 import type {
   PaymentRecord,
   PaymentRepository,
@@ -81,6 +82,22 @@ type ApplyEffect = { confirmed: boolean; refundId: string | null };
  * - Each attempt has a unique transaction ref that providers use as their
  *   idempotency key, so retries and uncertain outcomes can never double charge.
  */
+/**
+ * Refund of an entire capture that bought nothing (late or duplicate payment): ticket price,
+ * platform fee and VAT all go back, split per the booking's snapshot. Falls back to
+ * "ticket" for any amount that does not match the snapshot (never over-refunds).
+ */
+export function wholePaymentRefund(payment: PaymentRecord, booking: BookingCore): RefundComponents {
+  const components = fullRefund(booking.charges);
+  if (components.totalMinor === payment.amountMinor) return components;
+  return {
+    ticketMinor: payment.amountMinor,
+    platformFeeMinor: 0,
+    vatMinor: 0,
+    totalMinor: payment.amountMinor,
+  };
+}
+
 export class PaymentService {
   constructor(
     private readonly db: TransactionRunner & Queryable,
@@ -365,7 +382,7 @@ export class PaymentService {
           metadata: { ...metadata, duplicateCapture: true },
         });
         const refund = await this.refunds.createWithin(tx, updated, {
-          amountMinor: payment.amountMinor,
+          components: wholePaymentRefund(payment, booking),
           reason: 'Duplicate payment for an already paid booking',
         });
         effect.refundId = refund.id;
@@ -403,7 +420,7 @@ export class PaymentService {
     if (outcome === 'ALREADY_CONFIRMED') return;
     // Money arrived after the hold expired or the booking was cancelled: refund in full.
     const refund = await this.refunds.createWithin(tx, payment, {
-      amountMinor: payment.amountMinor,
+      components: wholePaymentRefund(payment, booking),
       reason:
         outcome === 'EXPIRED' || booking.status === 'EXPIRED'
           ? 'Payment received after the seat hold expired'

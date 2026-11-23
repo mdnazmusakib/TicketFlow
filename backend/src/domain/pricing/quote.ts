@@ -1,3 +1,4 @@
+import { computeCharges, type ChargePolicy, type Charges } from './charges';
 import type { PricingStrategyRegistry } from './PricingStrategy';
 
 export interface QuoteSeat {
@@ -25,10 +26,18 @@ export interface Quote {
   currency: string;
   appliedStrategy: string;
   lines: QuoteLine[];
+  /** Catalogue prices before any discount. */
   subtotalMinor: number;
   discountMinor: number;
+  /** Ticket price total after discounts (= subtotalMinor - discountMinor). */
+  ticketTotalMinor: number;
+  /** Platform fee, VAT and grand total for this selection. */
+  charges: Charges;
+  /** Grand total the customer pays (= charges.grandTotalMinor). */
   totalMinor: number;
 }
+
+export const NO_CHARGES: ChargePolicy = { platformFeePerSeatMinor: 0, vatRateBps: 0 };
 
 /** Prices a set of seats with the event's strategy at a given instant. */
 export function buildQuote(
@@ -36,6 +45,7 @@ export function buildQuote(
   event: QuoteEvent,
   seats: QuoteSeat[],
   now: Date,
+  chargePolicy: ChargePolicy = NO_CHARGES,
 ): Quote {
   const strategy = registry.resolve(event.pricingStrategy);
   let applied = 'BASE';
@@ -53,14 +63,18 @@ export function buildQuote(
   });
   const subtotalMinor = lines.reduce((sum, line) => sum + line.basePriceMinor, 0);
   const discountMinor = lines.reduce((sum, line) => sum + line.discountMinor, 0);
-  const totalMinor = subtotalMinor - discountMinor;
-  if (!Number.isSafeInteger(totalMinor)) throw new Error('Total exceeds the safe integer range');
+  const ticketTotalMinor = subtotalMinor - discountMinor;
+  if (!Number.isSafeInteger(ticketTotalMinor))
+    throw new Error('Total exceeds the safe integer range');
+  const charges = computeCharges(ticketTotalMinor, lines.length, chargePolicy);
   return {
     currency: event.currency,
     appliedStrategy: applied,
     lines,
     subtotalMinor,
     discountMinor,
-    totalMinor,
+    ticketTotalMinor,
+    charges,
+    totalMinor: charges.grandTotalMinor,
   };
 }

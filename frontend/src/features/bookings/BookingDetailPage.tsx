@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react';
+import { Button } from '../../components/ui/Button';
+import { PriceBreakdown } from './PriceBreakdown';
 import { Link, useParams } from 'react-router';
 import { ErrorMessage } from '../../components/ui/Feedback';
 import { Spinner } from '../../components/ui/Spinner';
@@ -104,15 +106,26 @@ export function BookingDetailPage({
             ))}
           </tbody>
         </table>
-        <p className="booking-summary__total">
-          Total <strong>{formatMoney(booking.totalAmountMinor, booking.currency)}</strong>
-          {booking.pricingStrategy === 'EARLY_BIRD' && (
-            <span className="badge badge--up"> Early-bird price</span>
-          )}
-        </p>
+        {booking.pricingStrategy === 'EARLY_BIRD' && (
+          <p>
+            <span className="badge badge--up">Early-bird price</span>
+          </p>
+        )}
+        <PriceBreakdown
+          title={booking.status === 'CONFIRMED' ? 'Receipt' : 'Price breakdown'}
+          totalLabel={booking.status === 'CONFIRMED' ? 'Total paid' : 'Total to pay'}
+          value={{ currency: booking.currency, ...booking.charges }}
+        />
 
         {booking.status === 'CONFIRMED' && (
-          <p className="alert alert--success">Payment received. Your tickets are confirmed.</p>
+          <>
+            <p className="alert alert--success">Payment received. Your tickets are confirmed.</p>
+            <p className="no-print">
+              <Button variant="secondary" onClick={() => window.print()}>
+                Print receipt
+              </Button>
+            </p>
+          </>
         )}
         <CancelBooking booking={booking} onBookingChange={setBooking} api={api} />
       </section>

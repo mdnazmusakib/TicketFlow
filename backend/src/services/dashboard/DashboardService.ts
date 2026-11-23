@@ -26,9 +26,13 @@ function salesDto(stats: EventSalesStats) {
     availableSeats: Math.max(0, stats.totalSeats - stats.soldSeats - stats.heldSeats),
     occupancyPct:
       stats.totalSeats === 0 ? 0 : Math.round((stats.soldSeats / stats.totalSeats) * 100),
+    // Organizer side: ticket sales only.
     grossRevenueMinor: stats.grossRevenueMinor,
     refundedMinor: stats.refundedMinor,
     netRevenueMinor: stats.grossRevenueMinor - stats.refundedMinor,
+    // Paid by customers on top of the tickets: platform revenue and tax, not organizer earnings.
+    platformFeesMinor: stats.platformFeesMinor - stats.refundedPlatformFeesMinor,
+    vatMinor: stats.vatMinor - stats.refundedVatMinor,
   };
 }
 
@@ -39,6 +43,7 @@ export class DashboardService {
     private readonly users: UserRepository,
     private readonly events: EventRepository,
     private readonly notifications: NotificationRepository,
+    private readonly options: { currency?: string } = {},
   ) {}
 
   async customer(actor: Actor) {
@@ -72,8 +77,18 @@ export class DashboardService {
         heldSeats: acc.heldSeats + e.heldSeats,
         grossRevenueMinor: acc.grossRevenueMinor + e.grossRevenueMinor,
         refundedMinor: acc.refundedMinor + e.refundedMinor,
+        platformFeesMinor:
+          acc.platformFeesMinor + e.platformFeesMinor - e.refundedPlatformFeesMinor,
+        vatMinor: acc.vatMinor + e.vatMinor - e.refundedVatMinor,
       }),
-      { soldSeats: 0, heldSeats: 0, grossRevenueMinor: 0, refundedMinor: 0 },
+      {
+        soldSeats: 0,
+        heldSeats: 0,
+        grossRevenueMinor: 0,
+        refundedMinor: 0,
+        platformFeesMinor: 0,
+        vatMinor: 0,
+      },
     );
     const now = Date.now();
     return {
@@ -125,6 +140,38 @@ export class DashboardService {
       this.dashboards.eventStatusCounts(null),
     ]);
     return { ...platform, bookingsByStatus, eventsByStatus, notificationDelivery: notifications };
+  }
+
+  /**
+   * Platform finance report for a period. Platform fee is TicketFlow revenue; VAT is a tax
+   * liability reported separately and never added to revenue; ticket sales belong to organizers.
+   */
+  async adminFinance(actor: Actor, range: { from?: Date; to?: Date }) {
+    if (actor.role !== 'ADMIN') throw new ForbiddenError();
+    const s = await this.dashboards.financeSummary(range);
+    return {
+      period: { from: s.from?.toISOString() ?? null, to: s.to?.toISOString() ?? null },
+      currency: this.options.currency ?? s.currency,
+      payments: s.payments,
+      refunds: s.refunds,
+      customerPaymentsMinor: s.customerPaymentsMinor,
+      ticketSales: {
+        grossMinor: s.ticketSalesMinor,
+        refundedMinor: s.refundedTicketMinor,
+        netMinor: s.ticketSalesMinor - s.refundedTicketMinor,
+      },
+      platformRevenue: {
+        grossMinor: s.platformFeeMinor,
+        refundedMinor: s.refundedPlatformFeeMinor,
+        netMinor: s.platformFeeMinor - s.refundedPlatformFeeMinor,
+      },
+      vatLiability: {
+        collectedMinor: s.vatMinor,
+        refundedMinor: s.refundedVatMinor,
+        netMinor: s.vatMinor - s.refundedVatMinor,
+      },
+      refundedTotalMinor: s.refundedTotalMinor,
+    };
   }
 
   async adminUsers(

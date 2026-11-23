@@ -63,6 +63,14 @@ export function RefundStatus({
         <span className={`badge ${TONE[latest.status]}`}>{LABEL[latest.status]}</span>{' '}
         {formatMoney(latest.amountMinor, latest.currency)}
       </p>
+      <dl className="details">
+        <dt>Ticket price</dt>
+        <dd>{formatMoney(latest.ticketMinor, latest.currency)}</dd>
+        <dt>Platform charge</dt>
+        <dd>{formatMoney(latest.platformFeeMinor, latest.currency)}</dd>
+        <dt>VAT</dt>
+        <dd>{formatMoney(latest.vatMinor, latest.currency)}</dd>
+      </dl>
       {latest.status === 'FAILED' && (
         <>
           <p className="muted">

@@ -31,7 +31,8 @@ Verification run for this audit: lint, Prettier, typecheck, build clean; backend
 | 9.4 | New channel without changing booking code | COMPLETE | `NotificationChannel` + dispatcher registration |
 | 9.5 | Real email delivery over SMTP in production | NOT VERIFIED | `SmtpEmailSender` (nodemailer) delivers over the SMTP protocol in a test against a local SMTP server (headers, stable Message-ID, failure → retry); no real mail provider account was configured here |
 | 10 | Zero double booking under concurrency | COMPLETE | partial unique index + Redis locks; concurrency suite on real PostgreSQL + Redis |
-| 11 | Full refund > 24 h before start, otherwise none | COMPLETE | `decideRefund`; boundary tests (exactly 24 h = no refund), Playwright full-refund journey |
+| 11b | Per-seat platform fee (BDT 10) and 2% VAT, transparent breakdown, immutable snapshot, separate reporting | COMPLETE (code) / NOT VERIFIED (production) | `charges.ts`, migration 0009, `charges.test.ts` (unit), `charges.api.test.ts` (integration), `charges.test.tsx` (UI); migration 0009 not yet applied to Supabase; VAT rate is a configurable business rule, not a legal compliance claim |
+| 11 | Full refund > 24 h before start, otherwise none | COMPLETE (ticket price) | `decideRefund` + `cancellationRefund`; boundary tests (exactly 24 h = no refund), Playwright refund journey. Since the fee change, "full refund" returns the ticket price; platform charge and VAT only if `REFUND_PLATFORM_FEE` / `REFUND_VAT` are enabled |
 | 12 | Operational & security baseline | COMPLETE | see §3 |
 
 ## 2. Roles, demo access, dashboards

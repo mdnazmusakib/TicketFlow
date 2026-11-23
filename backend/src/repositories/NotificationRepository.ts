@@ -115,9 +115,15 @@ export class NotificationRepository {
       venue_city: string;
       total_amount_minor: string;
       currency: string;
+      ticket_subtotal_minor: string;
+      platform_fee_minor: string;
+      platform_fee_per_seat_minor: string;
+      vat_minor: string;
+      vat_rate_bps: number;
     }>(
       `SELECT b.customer_id, u.name AS customer_name, e.title, e.start_at, v.timezone, v.name AS venue_name,
-              v.city AS venue_city, b.total_amount_minor, b.currency
+              v.city AS venue_city, b.total_amount_minor, b.currency, b.ticket_subtotal_minor,
+              b.platform_fee_minor, b.platform_fee_per_seat_minor, b.vat_minor, b.vat_rate_bps
        FROM bookings b JOIN users u ON u.id = b.customer_id JOIN events e ON e.id = b.event_id
        JOIN venues v ON v.id = e.venue_id WHERE b.id = $1`,
       [bookingId],
@@ -146,6 +152,11 @@ export class NotificationRepository {
       })),
       totalAmountMinor: Number(row.total_amount_minor),
       currency: row.currency,
+      ticketSubtotalMinor: Number(row.ticket_subtotal_minor),
+      platformFeeMinor: Number(row.platform_fee_minor),
+      platformFeePerSeatMinor: Number(row.platform_fee_per_seat_minor),
+      vatMinor: Number(row.vat_minor),
+      vatRateBps: Number(row.vat_rate_bps),
     };
   }
 

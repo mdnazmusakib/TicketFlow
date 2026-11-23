@@ -24,23 +24,35 @@ describe('Cancellation and refunds', () => {
     );
   }
 
-  it('full refund when cancelled more than 24 hours before the event', async () => {
-    const { agent, bookingId, totalMinor } = await confirmedBooking(h, { startInDays: 10 });
+  it('full ticket refund when cancelled more than 24 hours before the event (fee and VAT kept)', async () => {
+    const { agent, bookingId, totalMinor, ticketMinor } = await confirmedBooking(h, {
+      startInDays: 10,
+    });
+    expect(totalMinor).toBe(ticketMinor + 1000 + Math.floor((ticketMinor * 200 + 5000) / 10000));
     const preview = await agent.get(`/api/bookings/${bookingId}/cancellation`).expect(200);
     expect(preview.body.data).toMatchObject({
       refundable: true,
-      refundAmountMinor: totalMinor,
+      refundAmountMinor: ticketMinor,
       cancellable: true,
+      refundComponents: { ticketMinor, platformFeeMinor: 0, vatMinor: 0, totalMinor: ticketMinor },
+      nonRefundable: { platformFeeMinor: 1000, vatMinor: totalMinor - ticketMinor - 1000 },
     });
 
     const cancelled = await agent.post(`/api/bookings/${bookingId}/cancel`).expect(200);
     expect(cancelled.body.data).toMatchObject({
       status: 'CANCELLED',
-      refundAmountMinor: totalMinor,
-      refundDecision: { refundable: true, refundAmountMinor: totalMinor },
+      refundAmountMinor: ticketMinor,
+      refundDecision: { refundable: true, refundAmountMinor: ticketMinor },
     });
     expect(cancelled.body.data.refunds).toEqual([
-      expect.objectContaining({ status: 'SUCCEEDED', amountMinor: totalMinor, attempt: 1 }),
+      expect.objectContaining({
+        status: 'SUCCEEDED',
+        amountMinor: ticketMinor,
+        ticketMinor,
+        platformFeeMinor: 0,
+        vatMinor: 0,
+        attempt: 1,
+      }),
     ]);
     expect(cancelled.body.data.history.at(-1)).toMatchObject({
       to: 'CANCELLED',
@@ -75,17 +87,17 @@ describe('Cancellation and refunds', () => {
   });
 
   it('24 hours and 1 second before the event: full refund', async () => {
-    const { agent, bookingId, totalMinor } = await confirmedBooking(h);
+    const { agent, bookingId, ticketMinor } = await confirmedBooking(h);
     await setEventStart(bookingId, new Date(fixedNow.getTime() + 24 * HOUR + 1000));
     const cancelled = await agent.post(`/api/bookings/${bookingId}/cancel`).expect(200);
     expect(cancelled.body.data.refundDecision).toMatchObject({
       refundable: true,
-      refundAmountMinor: totalMinor,
+      refundAmountMinor: ticketMinor,
     });
   });
 
   it('retries a failed refund and never refunds twice', async () => {
-    const { agent, bookingId, totalMinor, paymentId } = await confirmedBooking(h, {
+    const { agent, bookingId, ticketMinor, paymentId } = await confirmedBooking(h, {
       token: 'tok_refund_fail_once',
     });
     const cancelled = await agent.post(`/api/bookings/${bookingId}/cancel`).expect(200);
@@ -102,7 +114,13 @@ describe('Cancellation and refunds', () => {
       'FAILED',
       'SUCCEEDED',
     ]);
-    expect(retried.body.data.refundAmountMinor).toBe(totalMinor);
+    expect(retried.body.data.refundAmountMinor).toBe(ticketMinor);
+    // The retry returns the same components as the failed attempt.
+    expect(retried.body.data.refunds[1]).toMatchObject({
+      ticketMinor,
+      platformFeeMinor: 0,
+      vatMinor: 0,
+    });
 
     // Idempotent: nothing left to retry, and re-processing a succeeded refund is a no-op.
     expect((await agent.post(`/api/bookings/${bookingId}/refunds/retry`)).status).toBe(409);

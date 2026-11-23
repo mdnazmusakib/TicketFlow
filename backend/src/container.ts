@@ -298,6 +298,10 @@ export function buildContainer(
     new PricingStrategyRegistry(),
     {
       maxTicketsPerUserPerEvent: config.booking.maxTicketsPerUserPerEvent,
+      chargePolicy: {
+        platformFeePerSeatMinor: config.charges.platformFeePerSeatMinor,
+        vatRateBps: config.charges.vatRateBps,
+      },
       holdTtlSeconds: config.booking.seatHoldTtlSeconds,
       logger,
       ...(overrides.now ? { now: overrides.now } : {}),
@@ -343,7 +347,14 @@ export function buildContainer(
     lifecycle,
     paymentService,
     refundService,
-    { logger, ...(overrides.now ? { now: overrides.now } : {}) },
+    {
+      logger,
+      refundPolicy: {
+        refundPlatformFee: config.charges.refundPlatformFee,
+        refundVat: config.charges.refundVat,
+      },
+      ...(overrides.now ? { now: overrides.now } : {}),
+    },
   );
 
   const expiryWorker = new BookingExpiryWorker(
@@ -372,7 +383,9 @@ export function buildContainer(
         new NotificationInboxService(notificationRepository),
       ),
       dashboards: new DashboardController(
-        new DashboardService(new DashboardRepository(db), users, events, notificationRepository),
+        new DashboardService(new DashboardRepository(db), users, events, notificationRepository, {
+          currency: config.booking.defaultCurrency,
+        }),
       ),
       health: new HealthController(healthService),
       auth: new AuthController(authService, config.auth.cookie),

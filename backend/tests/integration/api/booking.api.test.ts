@@ -35,7 +35,13 @@ describe('Booking API (real PostgreSQL)', () => {
         appliedStrategy: 'BASE',
         subtotalMinor: 300000,
         discountMinor: 0,
-        totalMinor: 300000,
+        ticketTotalMinor: 300000,
+        // BDT 10 platform charge per seat + 2% VAT on the ticket total.
+        platformFeePerSeatMinor: 1000,
+        platformFeeMinor: 2000,
+        vatRateBps: 200,
+        vatMinor: 6000,
+        totalMinor: 308000,
       });
     });
 
@@ -51,7 +57,15 @@ describe('Booking API (real PostgreSQL)', () => {
       expect(held.body.data).toMatchObject({
         status: 'HELD',
         pricingStrategy: 'EARLY_BIRD',
-        totalAmountMinor: 170000 + 85000,
+        // Discounted tickets 2,550.00 + platform 20.00 + VAT 2% of 2,550.00 = 51.00.
+        totalAmountMinor: 255000 + 2000 + 5100,
+        charges: {
+          seatCount: 2,
+          ticketSubtotalMinor: 255000,
+          platformFeeMinor: 2000,
+          vatMinor: 5100,
+          grandTotalMinor: 262100,
+        },
       });
       expect(
         (held.body.data.seats as { priceMinor: number }[])

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { PriceBreakdown } from './PriceBreakdown';
 import { Link, useNavigate } from 'react-router';
 import { Button } from '../../components/ui/Button';
 import { FormAlert } from '../../components/ui/Form';
@@ -172,14 +173,19 @@ export function SeatSelection({
                   </li>
                 ))}
               </ul>
-              {quote.discountMinor > 0 && (
-                <p className="muted">
-                  Early-bird savings: {formatMoney(quote.discountMinor, quote.currency)}
-                </p>
-              )}
-              <p className="booking-summary__total">
-                Total <strong>{formatMoney(quote.totalMinor, quote.currency)}</strong>
-              </p>
+              <PriceBreakdown
+                value={{
+                  currency: quote.currency,
+                  seatCount: quote.lines.length,
+                  ticketSubtotalMinor: quote.ticketTotalMinor,
+                  discountMinor: quote.discountMinor,
+                  platformFeePerSeatMinor: quote.platformFeePerSeatMinor,
+                  platformFeeMinor: quote.platformFeeMinor,
+                  vatRateBps: quote.vatRateBps,
+                  vatMinor: quote.vatMinor,
+                  grandTotalMinor: quote.totalMinor,
+                }}
+              />
             </>
           )}
           <Button disabled={effectiveSelection.size === 0 || holding} onClick={hold}>

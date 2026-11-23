@@ -28,6 +28,11 @@ function quoteFor(seatIds: string[]): Quote {
     appliedStrategy: 'EARLY_BIRD',
     subtotalMinor: seatIds.length * 100000,
     discountMinor: seatIds.length * 10000,
+    ticketTotalMinor: seatIds.length * 90000,
+    platformFeePerSeatMinor: 0,
+    platformFeeMinor: 0,
+    vatRateBps: 0,
+    vatMinor: 0,
     totalMinor: seatIds.length * 90000,
     lines: seatIds.map((seatId) => ({
       seatId,
@@ -58,6 +63,15 @@ const booking: Booking = {
   totalAmountMinor: 180000,
   refundAmountMinor: 0,
   currency: 'BDT',
+  charges: {
+    seatCount: 2,
+    ticketSubtotalMinor: 180000,
+    platformFeePerSeatMinor: 0,
+    platformFeeMinor: 0,
+    vatRateBps: 0,
+    vatMinor: 0,
+    grandTotalMinor: 180000,
+  },
   seats: [
     { seatId: 's1', row: 'A', number: 1, category: 'General', priceMinor: 90000, state: 'HELD' },
     { seatId: 's2', row: 'A', number: 2, category: 'General', priceMinor: 90000, state: 'HELD' },
@@ -107,7 +121,9 @@ describe('SeatSelection', () => {
     await userEvent.click(screen.getByRole('gridcell', { name: 'Row A seat 2' }));
     expect(screen.getByRole('gridcell', { name: 'Row B seat 4, unavailable' })).toBeDisabled();
 
-    expect(await screen.findByText(/Total/)).toHaveTextContent(/BDT\s?1,800\.00/);
+    expect(await screen.findByRole('row', { name: /Total to pay/ })).toHaveTextContent(
+      /BDT\s?1,800\.00/,
+    );
     expect(screen.getByText(/Early-bird savings/)).toBeInTheDocument();
     await waitFor(() =>
       expect(bookingsApi.quote).toHaveBeenLastCalledWith('e1', ['s1', 's2'], expect.anything()),

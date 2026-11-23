@@ -44,9 +44,13 @@ export interface EventSales {
   heldSeats: number;
   availableSeats: number;
   occupancyPct: number;
+  /** Ticket sales (organizer side); platform charges and VAT are reported separately. */
   grossRevenueMinor: number;
   refundedMinor: number;
   netRevenueMinor: number;
+  /** Paid by customers on top of tickets for this event (not organizer earnings). */
+  platformFeesMinor: number;
+  vatMinor: number;
 }
 
 export type StatusCounts = Partial<Record<string, number>>;
@@ -59,6 +63,8 @@ export interface OrganizerDashboard {
     grossRevenueMinor: number;
     refundedMinor: number;
     netRevenueMinor: number;
+    platformFeesMinor: number;
+    vatMinor: number;
   };
   eventsByStatus: StatusCounts;
   bookingsByStatus: StatusCounts;
@@ -109,6 +115,18 @@ export interface AdminOverview {
   notificationDelivery: StatusCounts;
 }
 
+export interface FinanceReport {
+  period: { from: string | null; to: string | null };
+  currency: string;
+  payments: number;
+  refunds: number;
+  customerPaymentsMinor: number;
+  ticketSales: { grossMinor: number; refundedMinor: number; netMinor: number };
+  platformRevenue: { grossMinor: number; refundedMinor: number; netMinor: number };
+  vatLiability: { collectedMinor: number; refundedMinor: number; netMinor: number };
+  refundedTotalMinor: number;
+}
+
 export interface AdminUser {
   id: string;
   name: string;
@@ -141,6 +159,17 @@ export function createDashboardApi(client: ApiClient = apiClient) {
     },
     async adminOverview(signal?: AbortSignal) {
       return (await client.get<AdminOverview>('/admin/overview', { signal })).data;
+    },
+    async adminFinance(params: { from?: string; to?: string }, signal?: AbortSignal) {
+      return (
+        await client.get<FinanceReport>('/admin/finance', {
+          query: {
+            ...(params.from ? { from: params.from } : {}),
+            ...(params.to ? { to: params.to } : {}),
+          },
+          signal,
+        })
+      ).data;
     },
     async adminUsers(
       params: { q?: string; role?: Role; page?: number; pageSize?: number },

@@ -58,8 +58,9 @@ export async function insertBooking(
   totalMinor = 100000,
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO bookings (event_id, customer_id, hold_expires_at, pricing_strategy, total_amount_minor, currency)
-     VALUES ($1, $2, now() + interval '5 minutes', 'BASE', $3, 'BDT') RETURNING id`,
+    `INSERT INTO bookings (event_id, customer_id, hold_expires_at, pricing_strategy, total_amount_minor,
+       ticket_subtotal_minor, currency)
+     VALUES ($1, $2, now() + interval '5 minutes', 'BASE', $3, $3, 'BDT') RETURNING id`,
     [eventId, customerId, totalMinor],
   );
   return rows[0]!.id;
